@@ -1,0 +1,80 @@
+
+database = { SOI ~ ( include_stmt | constant_stmt | stmt )* ~ EOI }
+
+// File inclusion command; process file as a database.
+// Databases should NOT have a comment in the filename.
+include_stmt = { start_include ~ filename ~ end_include }
+
+// Constant symbols declaration.
+constant_stmt = { start_constant ~ constant+ ~ end_stmt }
+
+// A normal statement can occur in any scope.
+stmt = { block | variable_stmt | disjoint_stmt | hypothesis_stmt | assert_stmt }
+
+// A block. You can have 0 statements in a block.
+block = { start_block ~ stmt* ~ end_block }
+
+// Variable symbols declaration.
+variable_stmt = { start_variable ~ variable+ ~ end_stmt }
+
+// Disjoint variables. Simple disjoint statements have
+// 2 variables, i.e., "variable*" is empty for them.
+disjoint_stmt = { start_disjoint ~ variable{2, } ~ end_stmt }
+
+hypothesis_stmt = { floating_stmt | essential_stmt }
+
+// Floating (variable_type) hypothesis.
+floating_stmt = { label ~ start_floating ~ typecode ~ variable ~ end_stmt }
+
+// Essential (logical) hypothesis.
+essential_stmt = { label ~ start_essential ~ typecode ~ math_symbol* ~ end_stmt }
+
+assert_stmt = { axiom_stmt | provable_stmt }
+
+// Axiomatic assertion.
+axiom_stmt = { label ~ start_axiom ~ typecode ~ math_symbol* ~ end_stmt }
+
+// Provable assertion.
+provable_stmt = { label ~ start_provable ~ typecode ~ math_symbol* ~ start_proof ~ proof ~ end_stmt }
+
+// A proof. Proofs may be interspersed by comments.
+// If '?' is in a proof it's an "incomplete" proof.
+proof = { uncompressed_proof | compressed_proof }
+uncompressed_proof = { ( label | "?" )+ }
+compressed_proof = { start_compr_proof_labels ~ label* ~ end_compr_proof_labels ~ compressed_proof_block+ }
+
+typecode = { constant }
+
+filename = { math_symbol }
+constant = { math_symbol }
+variable = { math_symbol }
+
+// ASCII printable characters, except '$' and whitespaces
+math_symbol = @{ ( !"$" ~ '\x21'..'\x7e' )+ }
+
+label = @{ ( ASCII_ALPHANUMERIC | "." | "-" | "_" )+ }
+
+compressed_proof_block = @{ ( 'A'..'Z' | "?" )+ }
+
+start_block = _{ "${" }
+end_block = _{ "$}" }
+start_include = _{ "$[" }
+end_include = _{ "$]" }
+start_constant = _{ "$c" }
+start_variable = _{ "$v" }
+start_floating = _{ "$f" }
+start_essential = _{ "$e" }
+start_disjoint = _{ "$d" }
+start_axiom = _{ "$a" }
+start_provable = _{ "$p" }
+start_proof = _{ "$=" }
+end_stmt = _{ "$." }
+start_compr_proof_labels = _{ "(" }
+end_compr_proof_labels = _{ ")" }
+
+// Whitespace
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+// Comments. $( ... $) and do not nest.
+COMMENT = _{ "$(" ~ (!"$)" ~ ANY)* ~ "$)" }
+

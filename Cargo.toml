@@ -1,0 +1,8 @@
+[package]
+name = "metamast"
+version = "0.1.0"
+authors = ["Antoine Choppin <antoine@japonophile.com>"]
+
+[dependencies]
+pest = "2.0"
+pest_derive = "2.0"
