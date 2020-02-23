@@ -19,4 +19,14 @@ fn test_strip_comments() {
 
     let text = strip_comments("$c wff $.\n$) $v x $.\n$( finished comment $)\n");
     assert!(text.is_err(), "Malformed comment");
+
+    // $( $[ $) is a comment
+
+    let text = strip_comments("$c wff $.\n$( $[ $)\n$v x $.\n");
+    assert_eq!(text.unwrap().to_string(), "$c wff $.\n\n$v x $.\n");
+
+    // they may not contain the 2-character sequences $( or $) (comments do not nest)
+
+    let text = strip_comments("$c wff $.\n$( comment $( nested comment, illegal $) $)\n$v x $.\n");
+    assert!(text.is_err(), "Comments may not be nested");
 }

@@ -19,8 +19,14 @@ pub fn strip_comments(_text: &str) -> Result<String, &str> {
                         if end < start {
                             return Err("Malformed comment");
                         }
+                        match find_start_at(&program, start + 2, "$(") {
+                            Some(next_comment) => if next_comment < end {
+                                return Err("Comments may not be nested");
+                            }
+                            None => ()
+                        }
                         let mut p = program[..start].to_string();
-                        p.push_str(&program[(end+2)..]);
+                        p.push_str(&program[(end + 2)..]);
                         program = p;
                     }
                     None => {
