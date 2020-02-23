@@ -1,23 +1,14 @@
 use std::fs;
-extern crate pest;
-#[macro_use]
-extern crate pest_derive;
 
-use pest::Parser;
-
-#[derive(Parser)]
-#[grammar = "mm.pest"]
-pub struct MetamathParser;
+use metamast::mm_parser::parse_program;
 
 fn main() {
     let filename = "mm/lib/set.mm";
     let program = fs::read_to_string(filename)
         .expect("Could not read file");
 
-    let result = MetamathParser::parse(Rule::database, &program)
-        .expect("Parse error")
-        .next().unwrap();
+    parse_program(&program);
 
-    println!("Parse result: {:?}", result);
+    println!("Done");
 }
 

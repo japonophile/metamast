@@ -2,6 +2,7 @@
 name = "metamast"
 version = "0.1.0"
 authors = ["Antoine Choppin <antoine@japonophile.com>"]
+edition = "2018"
 
 [dependencies]
 pest = "2.0"
