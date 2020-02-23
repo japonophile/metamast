@@ -13,19 +13,21 @@ pub fn strip_comments(_text: &str) -> Result<String, &str> {
     let mut i = 0;
     loop {
         match find_start_at(&program, i, "$(") {
-            Some(j) => {
-                println!("Found");
-                i = j;
+            Some(start) => {
                 match find_start_at(&program, i, "$)") {
-                    Some(k) => {
-                        let mut p = program[..i].to_string();
-                        p.push_str(&program[(k+2)..]);
+                    Some(end) => {
+                        if end < start {
+                            return Err("Malformed comment");
+                        }
+                        let mut p = program[..start].to_string();
+                        p.push_str(&program[(end+2)..]);
                         program = p;
                     }
                     None => {
                         return Err("Malformed comment");
                     }
                 }
+                i = start;
             }
             None => break,
         }
