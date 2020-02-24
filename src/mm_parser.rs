@@ -1,4 +1,5 @@
 use pest::Parser;
+use crate::io::{IO, FileIO};
 
 #[derive(Parser)]
 #[grammar = "mm.pest"]
@@ -8,8 +9,8 @@ fn find_start_at<'a>(slice: &'a str, at: usize, pat: &'a str) -> Option<usize> {
     slice[at..].find(pat).map(|i| at + i)
 }
 
-pub fn strip_comments(_text: &str) -> Result<String, &str> {
-    let mut program = String::from(_text);
+pub fn strip_comments(text: &str) -> Result<String, &str> {
+    let mut program = String::from(text);
     let mut i = 0;
     loop {
         match find_start_at(&program, i, "$(") {
@@ -44,10 +45,24 @@ pub fn strip_comments(_text: &str) -> Result<String, &str> {
     return Ok(program);
 }
 
-pub fn parse_program(_program: &str) {
-    let result = MetamathParser::parse(Rule::database, _program)
+pub fn read_file(io: &dyn IO, filename: &str) -> String {
+    return io.slurp(filename);
+}
+
+pub fn load_includes(io: &dyn IO, program: &str, includes: Vec<&str>, root: &str) -> String {
+    return "".to_string();
+}
+
+pub fn parse_program(program: &str) {
+    let result = MetamathParser::parse(Rule::database, program)
         .expect("Parse error")
         .next().unwrap();
     println!("Result: {:?}", result);
+}
+
+pub fn parse_metamath(filename: &str) {
+    let io = FileIO {};
+    let program = read_file(&io, filename);
+    parse_program(&program);
 }
 

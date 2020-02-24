@@ -1,13 +1,9 @@
-use std::fs;
-
-use metamast::mm_parser::parse_program;
+use metamast::mm_parser::parse_metamath;
 
 fn main() {
     let filename = "mm/lib/set.mm";
-    let program = fs::read_to_string(filename)
-        .expect("Could not read file");
 
-    parse_program(&program);
+    parse_metamath(filename);
 
     println!("Done");
 }
