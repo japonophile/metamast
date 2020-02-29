@@ -55,11 +55,11 @@ fn test_load_includes() {
     let result = load_includes(&mock,
                                "$c a $.\n$[ xyz.mm $]\n$v n $.\n",
                                ["root.mm"].to_vec(), ".");
-    assert_eq!(result, "$c a $.\n$v x y z $.\n\n$v n $.\n");
+    assert_eq!(result.unwrap(), "$c a $.\n$v x y z $.\n\n$v n $.\n");
 
     let result = load_includes(&mock,
                                "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n",
                                ["root.mm"].to_vec(), ".");
-    assert_eq!(result, "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n");
+    assert_eq!(result.unwrap(), "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n");
 }
 
