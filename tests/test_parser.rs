@@ -61,5 +61,11 @@ fn test_load_includes() {
                                "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n",
                                ["root.mm"].to_vec(), ".");
     assert_eq!(result.unwrap(), "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n");
+
+    // It is only allowed in the outermost scope (i.e., not between ${ and $})"
+    let result = load_includes(&mock,
+                               "$[ wrong-include.mm $]\n",
+                               ["root.mm"].to_vec(), ".");
+    assert!(result.is_err(), "Include statement only allowed in outermost scope");
 }
 

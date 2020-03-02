@@ -43,13 +43,13 @@ pub fn strip_comments(program: &str) -> Result<String, &str> {
     return Ok(processed.to_string());
 }
 
-fn read_file(io: &dyn IO, filename: &str, includes: Vec<&str>, root: &str) -> String {
+fn read_file<'a>(io: &dyn IO, filename: &str, includes: Vec<&str>, root: &str) -> Result<String, &'a str> {
     let full_path = format!("{}/{}", root, filename);
     let file_content = io.slurp(&full_path);
     let new_root = Path::new(&full_path).parent().unwrap().to_str().unwrap();
 
     return load_includes(io, &strip_comments(&file_content).unwrap(),
-                         includes, new_root).unwrap();
+                         includes, new_root);
 }
 
 pub fn load_includes<'a>(io: &dyn IO, program: &str, includes: Vec<&str>, root: &str) -> Result<String, &'a str> {
@@ -76,10 +76,16 @@ pub fn load_includes<'a>(io: &dyn IO, program: &str, includes: Vec<&str>, root: 
                 "$}" => depth -= 1,
                 "$[" => {
                     if depth == 0 {
-                        processed.push_str(&rest[..c.start()]);
-                        processed.push_str(&read_file(io, filename, includes.to_vec(), root));
-                        rest = &rest[c.end()..];
-                        break;
+                        let result = read_file(io, filename, includes.to_vec(), root);
+                        match result {
+                            Ok(included_file) => {
+                                processed.push_str(&rest[..c.start()]);
+                                processed.push_str(&included_file);
+                                rest = &rest[c.end()..];
+                                break;
+                            },
+                            _ => return result
+                        }
                     }
                     else {
                         return Err("Include statement only allowed in outermost scope");
@@ -104,7 +110,7 @@ pub fn parse_program(program: &str) {
 
 pub fn parse_metamath(filename: &str) {
     let io = FileIO {};
-    let program = read_file(&io, filename, vec![], ".");
+    let program = read_file(&io, filename, vec![], ".").unwrap();
     parse_program(&program);
 }
 
