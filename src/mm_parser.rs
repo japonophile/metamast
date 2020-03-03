@@ -7,7 +7,7 @@ use crate::io::{IO, FileIO};
 #[grammar = "mm.pest"]
 pub struct MetamathParser;
 
-pub fn strip_comments(program: &str) -> Result<String, &str> {
+pub fn strip_comments<'a>(program: &'a str) -> Result<String, &'a str> {
     let mut processed = "".to_string();
     let mut rest = program;
 
@@ -43,23 +43,23 @@ pub fn strip_comments(program: &str) -> Result<String, &str> {
     return Ok(processed.to_string());
 }
 
-fn read_file<'a>(io: &dyn IO, filename: &str, includes: Vec<&str>, root: &str) -> Result<String, &'a str> {
+fn read_file<'a>(io: &dyn IO, filename: &str, includes: Vec<String>, root: &str) -> Result<(String, Vec<String>), &'a str> {
     let full_path = format!("{}/{}", root, filename);
     let file_content = io.slurp(&full_path);
     let new_root = Path::new(&full_path).parent().unwrap().to_str().unwrap();
 
-    return load_includes(io, &strip_comments(&file_content).unwrap(),
-                         includes, new_root);
+    return load_includes(io, strip_comments(&file_content).unwrap(), includes, new_root);
 }
 
-pub fn load_includes<'a>(io: &dyn IO, program: &str, includes: Vec<&str>, root: &str) -> Result<String, &'a str> {
+pub fn load_includes<'a>(io: &dyn IO, program: String, includes: Vec<String>, root: &str) -> Result<(String, Vec<String>), &'a str> {
     lazy_static! {
         static ref INCLUDE_FILENAME_REGEX: Regex = Regex::new("\\$\\[\\s+(?P<filename>[^\\$]+)\\s+\\$\\]").unwrap();
         static ref BLOCK_AND_INCLUDE_REGEX: Regex = Regex::new("(\\$[{}])|(\\$\\[\\s+[^\\$]+\\s+\\$\\])").unwrap();
     }
 
+    let mut updated_includes = includes.to_vec();
     let mut processed = "".to_string();
-    let mut rest = program;
+    let mut rest = program.as_str();
 
     loop {
         if !INCLUDE_FILENAME_REGEX.is_match(rest) {
@@ -76,16 +76,20 @@ pub fn load_includes<'a>(io: &dyn IO, program: &str, includes: Vec<&str>, root: 
                 "$}" => depth -= 1,
                 "$[" => {
                     if depth == 0 {
-                        let result = read_file(io, filename, includes.to_vec(), root);
-                        match result {
-                            Ok(included_file) => {
-                                processed.push_str(&rest[..c.start()]);
-                                processed.push_str(&included_file);
-                                rest = &rest[c.end()..];
-                                break;
-                            },
-                            _ => return result
+                        processed.push_str(&rest[..c.start()]);
+                        if !updated_includes.iter().any(|e| e == &filename) {
+                            updated_includes.push(filename.to_owned());
+                            let result = read_file(io, &filename, updated_includes, root);
+                            match result {
+                                Ok((file_content, included_files)) => {
+                                    processed.push_str(&file_content);
+                                    updated_includes = included_files;
+                                },
+                                _ => return result
+                            }
                         }
+                        rest = &rest[c.end()..];
+                        break;
                     }
                     else {
                         return Err("Include statement only allowed in outermost scope");
@@ -97,7 +101,7 @@ pub fn load_includes<'a>(io: &dyn IO, program: &str, includes: Vec<&str>, root: 
         }
     }
 
-    return Ok(processed.to_string());
+    return Ok((processed.to_string(), updated_includes));
 }
 
 pub fn parse_program(program: &str) {
@@ -110,7 +114,7 @@ pub fn parse_program(program: &str) {
 
 pub fn parse_metamath(filename: &str) {
     let io = FileIO {};
-    let program = read_file(&io, filename, vec![], ".").unwrap();
+    let (program, _included_files) = read_file(&io, filename, vec![], ".").unwrap();
     parse_program(&program);
 }
 

@@ -46,26 +46,46 @@ fn test_load_includes() {
                     "./xyz-include.mm"   => "$c wff $.\n$[ abc.mm $]\n$v x y z $.\n",
                     "./xyz-include2.mm"  => "$c wff $.\n$[ abc.mm $]\n$[ root.mm $]\n$v x y z $.\n",
                     "./wrong-include.mm" => "$c a $.\n${ $[ xyz.mm $] $}\n$v n $.\n",
-                    _                    => "",
+                    _                    => "$c this file should not be included $.\n",
                 }
             }.to_string());
 
     // A file inclusion command consists of $[ followed by a file name followed by $].
 
     let result = load_includes(&mock,
-                               "$c a $.\n$[ xyz.mm $]\n$v n $.\n",
-                               ["root.mm"].to_vec(), ".");
-    assert_eq!(result.unwrap(), "$c a $.\n$v x y z $.\n\n$v n $.\n");
+                               "$c a $.\n$[ xyz.mm $]\n$v n $.\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
+    assert_eq!(result.unwrap().0, "$c a $.\n$v x y z $.\n\n$v n $.\n");
 
     let result = load_includes(&mock,
-                               "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n",
-                               ["root.mm"].to_vec(), ".");
-    assert_eq!(result.unwrap(), "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n");
+                               "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
+    assert_eq!(result.unwrap().0, "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n");
 
     // It is only allowed in the outermost scope (i.e., not between ${ and $})"
     let result = load_includes(&mock,
-                               "$[ wrong-include.mm $]\n",
-                               ["root.mm"].to_vec(), ".");
+                               "$[ wrong-include.mm $]\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
     assert!(result.is_err(), "Include statement only allowed in outermost scope");
+
+    // nested inclusion
+    let result = load_includes(&mock,
+                               "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
+    assert_eq!(result.unwrap().0, "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n");
+    let result = load_includes(&mock,
+                               "$c a $.\n$[ xyz-include2.mm $]\n$v n $.\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
+    assert_eq!(result.unwrap().0, "$c a $.\n$c wff $.\n$c a b c $.\n\n\n$v x y z $.\n\n$v n $.\n");
+
+    // no multiple inclusion
+    let result = load_includes(&mock,
+                               "$c a $.\n$[ root.mm $]\n$v n $.\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
+    assert_eq!(result.unwrap().0, "$c a $.\n\n$v n $.\n");
+    let result = load_includes(&mock,
+                               "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n$[ abc.mm $]\n".to_string(),
+                               ["root.mm".to_string()].to_vec(), ".");
+    assert_eq!(result.unwrap().0, "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n\n");
 }
 
