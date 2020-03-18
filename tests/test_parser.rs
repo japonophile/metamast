@@ -1,5 +1,5 @@
 use metamast::io::MockIO;
-use metamast::mm_parser::{load_includes, strip_comments};
+use metamast::mm_parser::{strip_comments, load_includes, parse_program};
 
 #[test]
 fn test_strip_comments() {
@@ -87,5 +87,14 @@ fn test_load_includes() {
                                "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n$[ abc.mm $]\n".to_string(),
                                ["root.mm".to_string()].to_vec(), ".");
     assert_eq!(result.unwrap().0, "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n\n");
+}
+
+#[test]
+fn test_parse_mm_program() {
+    // The same math symbol may not occur twice in a given $v or $c statement
+    let result = parse_program("$c c c $.\n");
+    assert!(result.is_err(), "Constant c was already defined before");
+    let result = parse_program("$v x y x $.\n");
+    assert!(result.is_err(), "Variable x was already defined before");
 }
 

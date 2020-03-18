@@ -1,6 +1,8 @@
-use std::path::Path;
+use std::fmt;
 use pest::Parser;
+use pest::iterators::Pair;
 use regex::Regex;
+use std::path::Path;
 use crate::io::{IO, FileIO};
 
 #[derive(Parser)]
@@ -104,17 +106,73 @@ pub fn load_includes<'a>(io: &dyn IO, program: String, includes: Vec<String>, ro
     return Ok((processed.to_string(), updated_includes));
 }
 
-pub fn parse_program(program: &str) {
+pub struct Program {
+    constants: Vec<String>,
+    variables: Vec<String>
+}
+
+pub fn parse_constant_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse constant_stmt");
+    let mut program = program;
+    for constant in stmt.into_inner() {
+        let c = constant.as_span().as_str();
+        if program.constants.contains(&c.to_string()) {
+            return Err(format!("Constant {} was already defined before", c));
+        }
+        println!("  Constant: {}", c);
+        program.constants.push(c.to_string());
+    }
+    return Ok(program);
+}
+
+pub fn parse_variable_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse variable_stmt");
+    let mut program = program;
+    for variable in stmt.into_inner() {
+        let v = variable.as_span().as_str();
+        if program.variables.contains(&v.to_string()) {
+            return Err(format!("Variable {} was already defined before", v));
+        }
+        println!("  Variable: {}", v);
+        program.variables.push(v.to_string());
+    }
+    return Ok(program);
+}
+
+pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, String> {
+    match tree.as_rule() {
+        Rule::constant_stmt => return parse_constant_stmt(tree, program),
+        Rule::variable_stmt => return parse_variable_stmt(tree, program),
+        _ => {
+            println!("Statement: {:?}", tree.as_rule());
+            return tree.into_inner().fold(Ok(program),
+                |p, rule| match p {
+                    Ok(prog) => traverse_tree(rule, prog),
+                    Err(e) => Err(e)
+                });
+        }
+    }
+}
+
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Constants: {:?}, Variables: {:?}", self.constants, self.variables)
+    }
+}
+
+pub fn parse_program(program: &str) -> Result<Program, String> {
     println!("Parse program");
-    let result = MetamathParser::parse(Rule::database, program)
+    let tree = MetamathParser::parse(Rule::database, program)
         .expect("Parse error")
         .next().unwrap();
-    println!("Result: {:?}", result);
+    println!("Result: {:?}", tree);
+    return traverse_tree(tree, Program { constants: vec![], variables: vec![] });
 }
 
 pub fn parse_metamath(filename: &str) {
     let io = FileIO {};
-    let (program, _included_files) = read_file(&io, filename, vec![], ".").unwrap();
-    parse_program(&program);
+    let (program_text, _included_files) = read_file(&io, filename, vec![], ".").unwrap();
+    let program = parse_program(&program_text);
+    println!("Result: {}", program.unwrap());
 }
 
