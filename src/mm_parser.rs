@@ -189,8 +189,17 @@ pub fn parse_floating_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     let label = children.next().unwrap().as_span().as_str().to_string();
     let typecode = children.next().unwrap().as_span().as_str().to_string();
     let variable = children.next().unwrap().as_span().as_str().to_string();
+
+    if !program.constants.contains(&typecode) {
+        return Err(format!("Type {} not found in constants", typecode));
+    }
+    if !program.scope.variables.contains(&variable) {
+        return Err(format!("Variable {} not defined", variable));
+    }
+
     println!("  {} {} {}", label, typecode, variable);
     program.scope.floatings.insert(label, Floating { typ: typecode, var: variable });
+
     Ok(program)
 }
 

@@ -132,5 +132,11 @@ fn test_parse_hypotheses() {
     // (an active constant), followed by an active variable, followed by the $. token.
     let program = parse_program("$c var c $.\n$v x $.\nvarx $f var x $.\n").unwrap();
     assert!(program.scope.floatings.contains_key(&"varx".to_string()));
+    let result = parse_program("$c var c $.\n$v x $.\nvarx $f bar x $.\n");
+    assert!(result.is_err(), "Type bar not found in constants");
+    let result = parse_program("$c var c $.\n$v x $.\nvarx $f var y $.\n");
+    assert!(result.is_err(), "Variable y not defined");
+    let result = parse_program("$c var c $.\n$v x $.\nvarx $f var c $.\n");
+    assert!(result.is_err(), "Variable c not defined");
 }
 
