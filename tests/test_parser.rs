@@ -96,5 +96,33 @@ fn test_parse_mm_program() {
     assert!(result.is_err(), "Constant c was already defined before");
     let result = parse_program("$v x y x $.\n");
     assert!(result.is_err(), "Variable x was already defined before");
+
+    // A math symbol becomes active when declared and stays active
+    // until the end of the block in which it is declared.
+    let program = parse_program("$v x y $.\n").unwrap();
+    assert!(program.scope.variables.contains(&"x".to_string()));
+
+    // A constant must be declared in the outermost block
+    parse_program("$c a b c $.\n${\n  $v x y $.\n$}\n$c d e f $.\n").unwrap();
+    let result = parse_program("$c a b c $.\n${\n  $c d e f $.\n$}\n");
+    assert!(result.is_err(), "Parse error");
+
+    // A constant ... may not be declared a second time.
+    let result = parse_program("$c a b c $.\n${\n  $v x y $.\n$}\n$c b $.\n");
+    assert!(result.is_err(), "Constant b was already defined before");
+
+    // A variable may not be declared a second time while it is active
+    let result = parse_program("${\n  $v x y $.\n  $v z x $. $}\n");
+    assert!(result.is_err(), "Variable x was already defined before");
+
+    // [a variable] may be declared again (as a variable, but not as a constant)
+    // after it becomes inactive.
+    parse_program("${\n  $v x y $.\n$}\n$v z x $.\n").unwrap();
+    let result = parse_program("${\n  $v x y $.\n$}\n$c z x $.\n");
+    assert!(result.is_err(), "Constant x was previously defined as a variable");
+
+    // A variable must not match an existing constant (follows from other rules)
+    let result = parse_program("$c x $.\n$v x $.\n");
+    assert!(result.is_err(), "Variable x matches an existing constant");
 }
 

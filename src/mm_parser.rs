@@ -42,7 +42,7 @@ pub fn strip_comments<'a>(program: &'a str) -> Result<String, &'a str> {
         }
     }
 
-    return Ok(processed.to_string());
+    Ok(processed.to_string())
 }
 
 fn read_file<'a>(io: &dyn IO, filename: &str, includes: Vec<String>, root: &str) -> Result<(String, Vec<String>), &'a str> {
@@ -103,12 +103,35 @@ pub fn load_includes<'a>(io: &dyn IO, program: String, includes: Vec<String>, ro
         }
     }
 
-    return Ok((processed.to_string(), updated_includes));
+    Ok((processed.to_string(), updated_includes))
+}
+
+pub struct Scope {
+    pub variables: Vec<String>
 }
 
 pub struct Program {
-    constants: Vec<String>,
-    variables: Vec<String>
+    pub constants: Vec<String>,
+    pub variables: Vec<String>,
+    pub scope: Scope
+}
+
+impl Clone for Scope {
+    fn clone(&self) -> Scope {
+        Scope { variables: self.variables.to_vec() }
+    }
+}
+
+impl std::fmt::Display for Scope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Variables: {:?}", self.variables)
+    }
+}
+
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Constants: {:?}, Scope: {}", self.constants, self.scope)
+    }
 }
 
 pub fn parse_constant_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
@@ -119,10 +142,13 @@ pub fn parse_constant_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
         if program.constants.contains(&c.to_string()) {
             return Err(format!("Constant {} was already defined before", c));
         }
+        if program.variables.contains(&c.to_string()) {
+            return Err(format!("Constant {} was previously defined as a variable", c));
+        }
         println!("  Constant: {}", c);
         program.constants.push(c.to_string());
     }
-    return Ok(program);
+    Ok(program)
 }
 
 pub fn parse_variable_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
@@ -130,19 +156,43 @@ pub fn parse_variable_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     let mut program = program;
     for variable in stmt.into_inner() {
         let v = variable.as_span().as_str();
-        if program.variables.contains(&v.to_string()) {
+        if program.scope.variables.contains(&v.to_string()) {
             return Err(format!("Variable {} was already defined before", v));
         }
+        if program.constants.contains(&v.to_string()) {
+            return Err(format!("Variable {} matches an existing constant", v));
+        }
         println!("  Variable: {}", v);
-        program.variables.push(v.to_string());
+        program.scope.variables.push(v.to_string());
+        if !program.variables.contains(&v.to_string()) {
+            program.variables.push(v.to_string());
+        }
     }
-    return Ok(program);
+    Ok(program)
+}
+
+pub fn parse_block<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse block");
+    let original_scope = program.scope.clone();
+    let result = stmt.into_inner().fold(Ok(program),
+    |p, rule| match p {
+        Ok(prog) => traverse_tree(rule, prog),
+        Err(e) => Err(e)
+    });
+    match result {
+        Ok(mut prog) => {
+            prog.scope = original_scope;
+            Ok(prog)
+        },
+        _ => result
+    }
 }
 
 pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, String> {
     match tree.as_rule() {
-        Rule::constant_stmt => return parse_constant_stmt(tree, program),
-        Rule::variable_stmt => return parse_variable_stmt(tree, program),
+        Rule::constant_stmt => parse_constant_stmt(tree, program),
+        Rule::variable_stmt => parse_variable_stmt(tree, program),
+        Rule::block         => parse_block(tree, program),
         _ => {
             println!("Statement: {:?}", tree.as_rule());
             return tree.into_inner().fold(Ok(program),
@@ -154,19 +204,18 @@ pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, 
     }
 }
 
-impl std::fmt::Display for Program {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Constants: {:?}, Variables: {:?}", self.constants, self.variables)
-    }
-}
-
 pub fn parse_program(program: &str) -> Result<Program, String> {
     println!("Parse program");
-    let tree = MetamathParser::parse(Rule::database, program)
-        .expect("Parse error")
-        .next().unwrap();
-    println!("Result: {:?}", tree);
-    return traverse_tree(tree, Program { constants: vec![], variables: vec![] });
+    let mut result = MetamathParser::parse(Rule::database, program);
+    match result {
+        Ok(ref mut tree) => {
+            println!("Result: {:?}", tree);
+            return traverse_tree(tree.next().unwrap(), Program {
+                constants: vec![], variables: vec![],
+                scope: Scope { variables: vec![] } });
+        },
+        _ => Err("Parse error".to_string())
+    }
 }
 
 pub fn parse_metamath(filename: &str) {
