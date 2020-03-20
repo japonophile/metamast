@@ -90,7 +90,7 @@ fn test_load_includes() {
 }
 
 #[test]
-fn test_parse_mm_program() {
+fn test_parse_constants_variables() {
     // The same math symbol may not occur twice in a given $v or $c statement
     let result = parse_program("$c c c $.\n");
     assert!(result.is_err(), "Constant c was already defined before");
@@ -124,5 +124,13 @@ fn test_parse_mm_program() {
     // A variable must not match an existing constant (follows from other rules)
     let result = parse_program("$c x $.\n$v x $.\n");
     assert!(result.is_err(), "Variable x matches an existing constant");
+}
+
+#[test]
+fn test_parse_hypotheses() {
+    // A $f statement consists of a label, followed by $f, followed by its typecode
+    // (an active constant), followed by an active variable, followed by the $. token.
+    let program = parse_program("$c var c $.\n$v x $.\nvarx $f var x $.\n").unwrap();
+    assert!(program.scope.floatings.contains_key(&"varx".to_string()));
 }
 

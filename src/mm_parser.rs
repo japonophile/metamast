@@ -1,7 +1,8 @@
-use std::fmt;
 use pest::Parser;
 use pest::iterators::Pair;
 use regex::Regex;
+use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 use crate::io::{IO, FileIO};
 
@@ -106,8 +107,15 @@ pub fn load_includes<'a>(io: &dyn IO, program: String, includes: Vec<String>, ro
     Ok((processed.to_string(), updated_includes))
 }
 
+#[derive(Clone, Debug)]
+pub struct Floating {
+    pub typ: String,
+    pub var: String
+}
+
 pub struct Scope {
-    pub variables: Vec<String>
+    pub variables: Vec<String>,
+    pub floatings: HashMap<String, Floating>
 }
 
 pub struct Program {
@@ -118,7 +126,10 @@ pub struct Program {
 
 impl Clone for Scope {
     fn clone(&self) -> Scope {
-        Scope { variables: self.variables.to_vec() }
+        Scope {
+            variables: self.variables.to_vec(),
+            floatings: self.floatings.clone()
+        }
     }
 }
 
@@ -171,6 +182,18 @@ pub fn parse_variable_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     Ok(program)
 }
 
+pub fn parse_floating_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse floating_stmt");
+    let mut program = program;
+    let mut children = stmt.into_inner();
+    let label = children.next().unwrap().as_span().as_str().to_string();
+    let typecode = children.next().unwrap().as_span().as_str().to_string();
+    let variable = children.next().unwrap().as_span().as_str().to_string();
+    println!("  {} {} {}", label, typecode, variable);
+    program.scope.floatings.insert(label, Floating { typ: typecode, var: variable });
+    Ok(program)
+}
+
 pub fn parse_block<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse block");
     let original_scope = program.scope.clone();
@@ -193,6 +216,7 @@ pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, 
         Rule::constant_stmt => parse_constant_stmt(tree, program),
         Rule::variable_stmt => parse_variable_stmt(tree, program),
         Rule::block         => parse_block(tree, program),
+        Rule::floating_stmt => parse_floating_stmt(tree, program),
         _ => {
             println!("Statement: {:?}", tree.as_rule());
             return tree.into_inner().fold(Ok(program),
@@ -212,7 +236,7 @@ pub fn parse_program(program: &str) -> Result<Program, String> {
             println!("Result: {:?}", tree);
             return traverse_tree(tree.next().unwrap(), Program {
                 constants: vec![], variables: vec![],
-                scope: Scope { variables: vec![] } });
+                scope: Scope { variables: vec![], floatings: HashMap::new() } });
         },
         _ => Err("Parse error".to_string())
     }
