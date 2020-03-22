@@ -113,22 +113,39 @@ pub struct Floating {
     pub var: String
 }
 
+pub struct Essential {
+    pub typ: String,
+    pub syms: Vec<String>
+}
+
 pub struct Scope {
     pub variables: Vec<String>,
-    pub floatings: HashMap<String, Floating>
+    pub floatings: HashMap<String, Floating>,
+    pub essentials: HashMap<String, Essential>
 }
 
 pub struct Program {
     pub constants: Vec<String>,
     pub variables: Vec<String>,
+    pub vartypes: HashMap<String, String>,
     pub scope: Scope
+}
+
+impl Clone for Essential {
+    fn clone(&self) -> Essential {
+        Essential {
+            typ: self.typ.clone(),
+            syms: self.syms.clone()
+        }
+    }
 }
 
 impl Clone for Scope {
     fn clone(&self) -> Scope {
         Scope {
             variables: self.variables.to_vec(),
-            floatings: self.floatings.clone()
+            floatings: self.floatings.clone(),
+            essentials: self.essentials.clone()
         }
     }
 }
@@ -186,19 +203,60 @@ pub fn parse_floating_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     println!("Parse floating_stmt");
     let mut program = program;
     let mut children = stmt.into_inner();
-    let label = children.next().unwrap().as_span().as_str().to_string();
-    let typecode = children.next().unwrap().as_span().as_str().to_string();
-    let variable = children.next().unwrap().as_span().as_str().to_string();
 
-    if !program.constants.contains(&typecode) {
+    let label = children.next().unwrap().as_span().as_str().to_string();
+    let typecode = children.next().unwrap().as_span().as_str();
+    let variable = children.next().unwrap().as_span().as_str();
+
+    if !program.constants.contains(&typecode.to_string()) {
         return Err(format!("Type {} not found in constants", typecode));
     }
-    if !program.scope.variables.contains(&variable) {
+    if !program.scope.variables.contains(&variable.to_string()) {
         return Err(format!("Variable {} not defined", variable));
+    }
+    for (_, floating) in program.scope.floatings.iter() {
+        if floating.var == variable {
+            return Err(format!("Variable {} was previously assigned type {}",
+                               variable, floating.typ));
+        }
+    }
+    if program.vartypes.contains_key(&variable.to_string()) &&
+        program.vartypes[&variable.to_string()] != typecode {
+        return Err(format!("Variable {} was previously assigned type {}", variable,
+                           program.vartypes[&variable.to_string()]));
     }
 
     println!("  {} {} {}", label, typecode, variable);
-    program.scope.floatings.insert(label, Floating { typ: typecode, var: variable });
+    program.scope.floatings.insert(label, Floating {
+        typ: typecode.to_string(), var: variable.to_string() });
+    program.vartypes.insert(variable.to_string(), typecode.to_string());
+
+    Ok(program)
+}
+
+pub fn parse_essential_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse essential_stmt");
+    let mut program = program;
+    let mut children = stmt.into_inner();
+
+    let label = children.next().unwrap().as_span().as_str().to_string();
+    let typecode = children.next().unwrap().as_span().as_str().to_string();
+    if !program.constants.contains(&typecode) {
+        return Err(format!("Type {} not found in constants", typecode));
+    }
+
+    let mut syms = vec![];
+    for sym in children {
+        let s = sym.as_span().as_str();
+        syms.push(s.to_string());
+        if !program.constants.contains(&s.to_string()) &&
+           !program.scope.variables.contains(&s.to_string()) {
+           return Err(format!("Variable or constant {} not defined", s));
+        }
+    }
+
+    println!("  {} {} {:?}", label, typecode, syms);
+    program.scope.essentials.insert(label, Essential { typ: typecode, syms: syms });
 
     Ok(program)
 }
@@ -222,10 +280,11 @@ pub fn parse_block<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, St
 
 pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, String> {
     match tree.as_rule() {
-        Rule::constant_stmt => parse_constant_stmt(tree, program),
-        Rule::variable_stmt => parse_variable_stmt(tree, program),
-        Rule::block         => parse_block(tree, program),
-        Rule::floating_stmt => parse_floating_stmt(tree, program),
+        Rule::constant_stmt  => parse_constant_stmt(tree, program),
+        Rule::variable_stmt  => parse_variable_stmt(tree, program),
+        Rule::block          => parse_block(tree, program),
+        Rule::floating_stmt  => parse_floating_stmt(tree, program),
+        Rule::essential_stmt => parse_essential_stmt(tree, program),
         _ => {
             println!("Statement: {:?}", tree.as_rule());
             return tree.into_inner().fold(Ok(program),
@@ -244,8 +303,12 @@ pub fn parse_program(program: &str) -> Result<Program, String> {
         Ok(ref mut tree) => {
             println!("Result: {:?}", tree);
             return traverse_tree(tree.next().unwrap(), Program {
-                constants: vec![], variables: vec![],
-                scope: Scope { variables: vec![], floatings: HashMap::new() } });
+                constants: vec![], variables: vec![], vartypes: HashMap::new(),
+                scope: Scope {
+                    variables: vec![],
+                    floatings: HashMap::new(),
+                    essentials: HashMap::new()
+                } });
         },
         _ => Err("Parse error".to_string())
     }

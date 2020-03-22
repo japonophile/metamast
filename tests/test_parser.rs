@@ -138,5 +138,39 @@ fn test_parse_hypotheses() {
     assert!(result.is_err(), "Variable y not defined");
     let result = parse_program("$c var c $.\n$v x $.\nvarx $f var c $.\n");
     assert!(result.is_err(), "Variable c not defined");
+
+    // A $e statement consists of a label, followed by $e, followed by its typecode
+    // (an active constant), followed by zero or more active math symbols, followed
+    // by the $. token.
+    let program = parse_program(
+        "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e var x a a $.\n").unwrap();
+    assert!(program.scope.essentials.contains_key(&"ess1".to_string()));
+    let program = parse_program("$c var $.\ness1 $e var $.\n").unwrap();
+    assert!(program.scope.essentials.contains_key(&"ess1".to_string()));
+    let result = parse_program(
+        "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e bar x a a $.\n");
+    assert!(result.is_err(), "Type bar not found in constants");
+    let result = parse_program("$c var a b $.\n$v x $.\ness1 $e var y a a $.\n");
+    assert!(result.is_err(), "Variable or constant y not defined");
+    let result = parse_program(
+        "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e var x a b a x c $.\n");
+    assert!(result.is_err(), "Variable or constant c not defined");
+    let result = parse_program("$c var a b $.\n${ $v x $. $}\ness1 $e var x a a $.\n");
+    assert!(result.is_err(), "Variable or constant x not defined");
+
+    // The type declared by a $f statement for a given label is global
+    // even if the variable is not (e.g., a database may not have wff P in one
+    // local scope and class P in another).
+    let result = parse_program(
+        "$c wff class $.\n${ $v P $.\nwff_P $f wff P $. $}\n${ $v P $.\nclass_P $f class P $. $}\n");
+    assert!(result.is_err(), "Variable P was previously assigned type wff");
+
+    // There may not be two active $f statements containing the same variable.
+    let result = parse_program(
+        "$c var int $.\n$v x $.\nvarx $f var x $.\nintx $f int x $.\n");
+    assert!(result.is_err(), "Variable x was previously assigned type var");
+    let result = parse_program(
+        "$c var int $.\n$v x $.\nvarx $f var x $.\nvarx2 $f var x $.\n");
+    assert!(result.is_err(), "Variable x was previously assigned type var");
 }
 
