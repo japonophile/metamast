@@ -121,7 +121,8 @@ pub struct Essential {
 pub struct Scope {
     pub variables: Vec<String>,
     pub floatings: HashMap<String, Floating>,
-    pub essentials: HashMap<String, Essential>
+    pub essentials: HashMap<String, Essential>,
+    pub disjoints: Vec<(String, String)>
 }
 
 pub struct Program {
@@ -145,7 +146,8 @@ impl Clone for Scope {
         Scope {
             variables: self.variables.to_vec(),
             floatings: self.floatings.clone(),
-            essentials: self.essentials.clone()
+            essentials: self.essentials.clone(),
+            disjoints: self.disjoints.to_vec()
         }
     }
 }
@@ -261,6 +263,41 @@ pub fn parse_essential_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pr
     Ok(program)
 }
 
+pub fn parse_disjoint_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse disjoint_stmt");
+    let mut program = program;
+    let children = stmt.into_inner();
+
+    let mut vars = vec![];
+    for var in children {
+        let v = var.as_span().as_str();
+        if vars.contains(&v.to_string()) {
+           return Err(format!("Variable {} appears more than once in a disjoint statement", v));
+        }
+        if !program.scope.variables.contains(&v.to_string()) {
+            return Err(format!("Variable {} not active", v));
+        }
+        vars.push(v.to_string());
+    }
+    vars.sort();
+
+    let (mut i, mut j, n) = (0, 1, vars.len());
+    loop {
+        println!("  {} {}", vars[i], vars[j]);
+        program.scope.disjoints.push((vars[i].to_string(), vars[j].to_string()));
+        j += 1;
+        if j >= n {
+            i += 1;
+            if i >= n - 1 {
+                break;
+            }
+            j = i + 1;
+        }
+    }
+
+    Ok(program)
+}
+
 pub fn parse_block<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse block");
     let original_scope = program.scope.clone();
@@ -285,6 +322,7 @@ pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, 
         Rule::block          => parse_block(tree, program),
         Rule::floating_stmt  => parse_floating_stmt(tree, program),
         Rule::essential_stmt => parse_essential_stmt(tree, program),
+        Rule::disjoint_stmt  => parse_disjoint_stmt(tree, program),
         _ => {
             println!("Statement: {:?}", tree.as_rule());
             return tree.into_inner().fold(Ok(program),
@@ -307,7 +345,8 @@ pub fn parse_program(program: &str) -> Result<Program, String> {
                 scope: Scope {
                     variables: vec![],
                     floatings: HashMap::new(),
-                    essentials: HashMap::new()
+                    essentials: HashMap::new(),
+                    disjoints: vec![]
                 } });
         },
         _ => Err("Parse error".to_string())

@@ -174,3 +174,29 @@ fn test_parse_hypotheses() {
     assert!(result.is_err(), "Variable x was previously assigned type var");
 }
 
+#[test]
+fn test_parse_disjoints() {
+    // A simple $d statement consists of $d, followed by two different
+    // active variables, followed by the $. token.
+    let program = parse_program("$v x y $.\n$d x y $.\n").unwrap();
+    assert_eq!(1, program.scope.disjoints.len());
+    let result = parse_program("$v x y $.\n$d x x $.\n");
+    assert!(result.is_err(), "Variable x appears more than once in a disjoint statement");
+    let result = parse_program("$v y $.\n$d x y $.\n");
+    assert!(result.is_err(), "Variable x not active");
+    let result = parse_program("$v y $.\n${ $v x $. $}\n$d x y $.\n");
+    assert!(result.is_err(), "Variable x not active");
+
+    // A compound $d statement consists of $d, followed by three or more
+    // variables (all different), followed by the $. token.
+    let program = parse_program("$v x y z $.\n$d x z y $.\n").unwrap();
+    assert_eq!(3, program.scope.disjoints.len());
+    let result = parse_program("$v x y z $.\n$d z x z y $.\n");
+    assert!(result.is_err(), "Variable z appears more than once in a disjoint statement");
+
+    // The order of the variables in a $d statement is unimportant.
+    let disjoints1 = parse_program("$v x y z $.\n$d x y z $.\n").unwrap().scope.disjoints;
+    let disjoints2 = parse_program("$v x y z $.\n$d x z y $.\n").unwrap().scope.disjoints;
+    assert_eq!(disjoints1, disjoints2);
+}
+
