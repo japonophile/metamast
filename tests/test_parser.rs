@@ -200,3 +200,37 @@ fn test_parse_disjoints() {
     assert_eq!(disjoints1, disjoints2);
 }
 
+#[test]
+fn test_parse_assertions() {
+    // A $a statement consists of a label, followed by $a, followed by its typecode
+    // (an active constant), followed by zero or more active math symbols,
+    // followed by the $. token.
+    let program = parse_program(
+        "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\n").unwrap();
+    assert!(program.axioms.contains_key(&"ax1".to_string()));
+    let program = parse_program(
+        "$c var wff = $.\n$v x $.\nvarx $f var x $.\nax1 $a wff = x x $.\n").unwrap();
+    assert!(program.axioms.contains_key(&"ax1".to_string()));
+    let result = parse_program("$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a woof x $.\n");
+    assert!(result.is_err(), "Type woof not found in constants");
+    let result = parse_program("$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff y $.\n");
+    assert!(result.is_err(), "Variable or constant y not defined");
+
+    // A $p statement consists of a label, followed by $p, followed by its typecode
+    // (an active constant), followed by zero or more active math symbols,
+    // followed by $=, followed by a sequence of labels, followed by the $. token.
+    let program = parse_program(
+        "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p wff x $= dum dum $.\n").unwrap();
+    assert!(program.provables.contains_key(&"p1".to_string()));
+    let program = parse_program(
+        "$c var wff = $.\n$v x $.\nvarx $f var x $.\nding $a var x $.\ndong $a wff x $.\np1 $p wff = x x $= ding dong $.\n").unwrap();
+    assert!(program.provables.contains_key(&"p1".to_string()));
+    let result = parse_program(
+        "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p woof x $= dum dum $.\n");
+    assert!(result.is_err(), "Type woof not found in constants");
+
+    // Each variable in a $e, $a, or $p statement must exist in an active $f statement.
+    let result = parse_program("$c var wff $.\n$v x $.\nmin $e wff x $.\n");
+    assert!(result.is_err(), "Variable x must be assigned a type");
+}
+

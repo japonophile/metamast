@@ -113,7 +113,7 @@ pub struct Floating {
     pub var: String
 }
 
-pub struct Essential {
+pub struct TypedSymbols {
     pub typ: String,
     pub syms: Vec<String>
 }
@@ -121,7 +121,7 @@ pub struct Essential {
 pub struct Scope {
     pub variables: Vec<String>,
     pub floatings: HashMap<String, Floating>,
-    pub essentials: HashMap<String, Essential>,
+    pub essentials: HashMap<String, TypedSymbols>,
     pub disjoints: Vec<(String, String)>
 }
 
@@ -129,12 +129,14 @@ pub struct Program {
     pub constants: Vec<String>,
     pub variables: Vec<String>,
     pub vartypes: HashMap<String, String>,
+    pub axioms: HashMap<String, TypedSymbols>,
+    pub provables: HashMap<String, TypedSymbols>,
     pub scope: Scope
 }
 
-impl Clone for Essential {
-    fn clone(&self) -> Essential {
-        Essential {
+impl Clone for TypedSymbols {
+    fn clone(&self) -> TypedSymbols {
+        TypedSymbols {
             typ: self.typ.clone(),
             syms: self.syms.clone()
         }
@@ -164,7 +166,7 @@ impl std::fmt::Display for Program {
     }
 }
 
-pub fn parse_constant_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse constant_stmt");
     let mut program = program;
     for constant in stmt.into_inner() {
@@ -181,7 +183,7 @@ pub fn parse_constant_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     Ok(program)
 }
 
-pub fn parse_variable_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_variable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse variable_stmt");
     let mut program = program;
     for variable in stmt.into_inner() {
@@ -201,7 +203,16 @@ pub fn parse_variable_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     Ok(program)
 }
 
-pub fn parse_floating_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn get_variable_type(variable: &str, program: &Program) -> Option<String> {
+    for (_, floating) in program.scope.floatings.iter() {
+        if floating.var == variable {
+            return Some(floating.typ.to_string());
+        }
+    }
+    None
+}
+
+pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse floating_stmt");
     let mut program = program;
     let mut children = stmt.into_inner();
@@ -216,11 +227,10 @@ pub fn parse_floating_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     if !program.scope.variables.contains(&variable.to_string()) {
         return Err(format!("Variable {} not defined", variable));
     }
-    for (_, floating) in program.scope.floatings.iter() {
-        if floating.var == variable {
-            return Err(format!("Variable {} was previously assigned type {}",
-                               variable, floating.typ));
-        }
+    match get_variable_type(&variable, &program) {
+        Some(typecode) => return Err(format!("Variable {} was previously assigned type {}",
+                                             variable, typecode)),
+        _ => {}
     }
     if program.vartypes.contains_key(&variable.to_string()) &&
         program.vartypes[&variable.to_string()] != typecode {
@@ -236,9 +246,7 @@ pub fn parse_floating_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     Ok(program)
 }
 
-pub fn parse_essential_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse essential_stmt");
-    let mut program = program;
+pub fn parse_typed_symbols(stmt: Pair<Rule>, program: &Program) -> Result<(String, TypedSymbols), String> {
     let mut children = stmt.into_inner();
 
     let label = children.next().unwrap().as_span().as_str().to_string();
@@ -249,21 +257,39 @@ pub fn parse_essential_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pr
 
     let mut syms = vec![];
     for sym in children {
+        if sym.as_rule() != Rule::math_symbol {
+            continue
+        }
         let s = sym.as_span().as_str();
         syms.push(s.to_string());
-        if !program.constants.contains(&s.to_string()) &&
-           !program.scope.variables.contains(&s.to_string()) {
+        if program.scope.variables.contains(&s.to_string()) {
+            if get_variable_type(&s, &program).is_none() {
+                return Err(format!("Variable {} must be assigned a type", s));
+            }
+        }
+        else if !program.constants.contains(&s.to_string()) {
            return Err(format!("Variable or constant {} not defined", s));
         }
     }
 
-    println!("  {} {} {:?}", label, typecode, syms);
-    program.scope.essentials.insert(label, Essential { typ: typecode, syms: syms });
-
-    Ok(program)
+    return Ok((label, TypedSymbols { typ: typecode, syms: syms }));
 }
 
-pub fn parse_disjoint_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_essential_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse essential_stmt");
+
+    match parse_typed_symbols(stmt, &program) {
+        Ok((label, typed_symbols)) => {
+            println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
+            let mut program = program;
+            program.scope.essentials.insert(label, typed_symbols);
+            Ok(program)
+        },
+        Err(e) => Err(e)
+    }
+}
+
+pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse disjoint_stmt");
     let mut program = program;
     let children = stmt.into_inner();
@@ -298,7 +324,35 @@ pub fn parse_disjoint_stmt<'a>(stmt: Pair<Rule>, program: Program) -> Result<Pro
     Ok(program)
 }
 
-pub fn parse_block<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_axiom_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse axiom_stmt");
+
+    match parse_typed_symbols(stmt, &program) {
+        Ok((label, typed_symbols)) => {
+            println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
+            let mut program = program;
+            program.axioms.insert(label, typed_symbols);
+            Ok(program)
+        },
+        Err(e) => Err(e)
+    }
+}
+
+pub fn parse_provable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+    println!("Parse provable_stmt");
+
+    match parse_typed_symbols(stmt, &program) {
+        Ok((label, typed_symbols)) => {
+            println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
+            let mut program = program;
+            program.provables.insert(label, typed_symbols);
+            Ok(program)
+        },
+        Err(e) => Err(e)
+    }
+}
+
+pub fn parse_block(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse block");
     let original_scope = program.scope.clone();
     let result = stmt.into_inner().fold(Ok(program),
@@ -315,7 +369,7 @@ pub fn parse_block<'a>(stmt: Pair<Rule>, program: Program) -> Result<Program, St
     }
 }
 
-pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn traverse_tree(tree: Pair<Rule>, program: Program) -> Result<Program, String> {
     match tree.as_rule() {
         Rule::constant_stmt  => parse_constant_stmt(tree, program),
         Rule::variable_stmt  => parse_variable_stmt(tree, program),
@@ -323,6 +377,8 @@ pub fn traverse_tree<'a>(tree: Pair<Rule>, program: Program) -> Result<Program, 
         Rule::floating_stmt  => parse_floating_stmt(tree, program),
         Rule::essential_stmt => parse_essential_stmt(tree, program),
         Rule::disjoint_stmt  => parse_disjoint_stmt(tree, program),
+        Rule::axiom_stmt     => parse_axiom_stmt(tree, program),
+        Rule::provable_stmt  => parse_provable_stmt(tree, program),
         _ => {
             println!("Statement: {:?}", tree.as_rule());
             return tree.into_inner().fold(Ok(program),
@@ -341,7 +397,11 @@ pub fn parse_program(program: &str) -> Result<Program, String> {
         Ok(ref mut tree) => {
             println!("Result: {:?}", tree);
             return traverse_tree(tree.next().unwrap(), Program {
-                constants: vec![], variables: vec![], vartypes: HashMap::new(),
+                constants: vec![],
+                variables: vec![],
+                vartypes: HashMap::new(),
+                axioms: HashMap::new(),
+                provables: HashMap::new(),
                 scope: Scope {
                     variables: vec![],
                     floatings: HashMap::new(),
