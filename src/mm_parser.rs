@@ -129,6 +129,7 @@ pub struct Program {
     pub constants: Vec<String>,
     pub variables: Vec<String>,
     pub vartypes: HashMap<String, String>,
+    pub labels: Vec<String>,
     pub axioms: HashMap<String, TypedSymbols>,
     pub provables: HashMap<String, TypedSymbols>,
     pub scope: Scope
@@ -177,6 +178,9 @@ pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
         if program.variables.contains(&c.to_string()) {
             return Err(format!("Constant {} was previously defined as a variable", c));
         }
+        if program.labels.contains(&c.to_string()) {
+            return Err(format!("Constant {} matches an existing label", c));
+        }
         println!("  Constant: {}", c);
         program.constants.push(c.to_string());
     }
@@ -193,6 +197,9 @@ pub fn parse_variable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
         }
         if program.constants.contains(&v.to_string()) {
             return Err(format!("Variable {} matches an existing constant", v));
+        }
+        if program.labels.contains(&v.to_string()) {
+            return Err(format!("Variable {} matches an existing label", v));
         }
         println!("  Variable: {}", v);
         program.scope.variables.push(v.to_string());
@@ -275,15 +282,33 @@ pub fn parse_typed_symbols(stmt: Pair<Rule>, program: &Program) -> Result<(Strin
     return Ok((label, TypedSymbols { typ: typecode, syms: syms }));
 }
 
+pub fn add_label(label: &str, mut program: Program) -> Result<Program, String> {
+    if program.labels.contains(&label.to_string()) {
+       return Err(format!("Label {} was already defined before", label));
+    }
+    if program.constants.contains(&label.to_string()) {
+       return Err(format!("Label {} matches a constant", label));
+    }
+    if program.variables.contains(&label.to_string()) {
+       return Err(format!("Label {} matches a variable", label));
+    }
+    program.labels.push(label.to_string());
+    Ok(program)
+}
+
 pub fn parse_essential_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse essential_stmt");
 
     match parse_typed_symbols(stmt, &program) {
         Ok((label, typed_symbols)) => {
             println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
-            let mut program = program;
-            program.scope.essentials.insert(label, typed_symbols);
-            Ok(program)
+            match add_label(&label, program) {
+                Ok(mut program) => {
+                    program.scope.essentials.insert(label, typed_symbols);
+                    Ok(program)
+                },
+                Err(e) => Err(e)
+            }
         },
         Err(e) => Err(e)
     }
@@ -330,9 +355,13 @@ pub fn parse_axiom_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, S
     match parse_typed_symbols(stmt, &program) {
         Ok((label, typed_symbols)) => {
             println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
-            let mut program = program;
-            program.axioms.insert(label, typed_symbols);
-            Ok(program)
+            match add_label(&label, program) {
+                Ok(mut program) => {
+                    program.axioms.insert(label, typed_symbols);
+                    return Ok(program)
+                },
+                Err(e) => Err(e)
+            }
         },
         Err(e) => Err(e)
     }
@@ -344,9 +373,13 @@ pub fn parse_provable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     match parse_typed_symbols(stmt, &program) {
         Ok((label, typed_symbols)) => {
             println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
-            let mut program = program;
-            program.provables.insert(label, typed_symbols);
-            Ok(program)
+            match add_label(&label, program) {
+                Ok(mut program) => {
+                    program.provables.insert(label, typed_symbols);
+                    Ok(program)
+                },
+                Err(e) => Err(e)
+            }
         },
         Err(e) => Err(e)
     }
@@ -400,6 +433,7 @@ pub fn parse_program(program: &str) -> Result<Program, String> {
                 constants: vec![],
                 variables: vec![],
                 vartypes: HashMap::new(),
+                labels: vec![],
                 axioms: HashMap::new(),
                 provables: HashMap::new(),
                 scope: Scope {
