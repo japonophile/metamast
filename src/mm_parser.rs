@@ -113,11 +113,13 @@ pub struct Floating {
     pub var: String
 }
 
+#[derive(Debug)]
 pub struct TypedSymbols {
     pub typ: String,
     pub syms: Vec<String>
 }
 
+#[derive(Debug)]
 pub struct Scope {
     pub variables: Vec<String>,
     pub floatings: HashMap<String, Floating>,
@@ -125,13 +127,36 @@ pub struct Scope {
     pub disjoints: Vec<(String, String)>
 }
 
+#[derive(Debug)]
+pub enum Proof {
+    Uncompressed {
+        syms: Vec<String>
+    },
+    Compressed {
+        chars: String
+    }
+}
+
+#[derive(Debug)]
+pub struct Axiom {
+    pub ax: TypedSymbols,
+    pub scope: Scope
+}
+
+#[derive(Debug)]
+pub struct Provable {
+    pub ax: TypedSymbols,
+    pub proof: Proof,
+    pub scope: Scope
+}
+
 pub struct Program {
     pub constants: Vec<String>,
     pub variables: Vec<String>,
     pub vartypes: HashMap<String, String>,
     pub labels: Vec<String>,
-    pub axioms: HashMap<String, TypedSymbols>,
-    pub provables: HashMap<String, TypedSymbols>,
+    pub axioms: HashMap<String, Axiom>,
+    pub provables: HashMap<String, Provable>,
     pub scope: Scope
 }
 
@@ -157,7 +182,8 @@ impl Clone for Scope {
 
 impl std::fmt::Display for Scope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Variables: {:?}", self.variables)
+        write!(f, "Variables: {:?}\nFloatings: {:?}\nEssentials: {:?}\nDisjoints: {:?}",
+               self.variables, self.floatings, self.essentials, self.disjoints)
     }
 }
 
@@ -253,8 +279,8 @@ pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     Ok(program)
 }
 
-pub fn parse_typed_symbols(stmt: Pair<Rule>, program: &Program) -> Result<(String, TypedSymbols), String> {
-    let mut children = stmt.into_inner();
+pub fn parse_typed_symbols(stmt: &Pair<Rule>, program: &Program) -> Result<(String, TypedSymbols), String> {
+    let mut children = stmt.clone().into_inner();
 
     let label = children.next().unwrap().as_span().as_str().to_string();
     let typecode = children.next().unwrap().as_span().as_str().to_string();
@@ -299,7 +325,7 @@ pub fn add_label(label: &str, mut program: Program) -> Result<Program, String> {
 pub fn parse_essential_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse essential_stmt");
 
-    match parse_typed_symbols(stmt, &program) {
+    match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
             println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
             match add_label(&label, program) {
@@ -352,12 +378,15 @@ pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
 pub fn parse_axiom_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse axiom_stmt");
 
-    match parse_typed_symbols(stmt, &program) {
+    match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
             println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
             match add_label(&label, program) {
                 Ok(mut program) => {
-                    program.axioms.insert(label, typed_symbols);
+                    program.axioms.insert(label, Axiom {
+                        ax: typed_symbols,
+                        scope: program.scope.clone()
+                    });
                     return Ok(program)
                 },
                 Err(e) => Err(e)
@@ -367,16 +396,53 @@ pub fn parse_axiom_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, S
     }
 }
 
+pub fn parse_proof(stmt: &Pair<Rule>) -> Result<Proof, String> {
+    let children = stmt.clone().into_inner();
+    for c in children {
+        if c.as_rule() != Rule::proof {
+            continue
+        }
+        let mut children = c.into_inner();
+        let proof = children.next().unwrap();
+        match proof.as_rule() {
+            Rule::uncompressed_proof => {
+                let syms = proof.into_inner().fold(
+                    vec![], |mut ss, s| { ss.push(s.as_span().as_str().to_string()); ss });
+                println!("  uncompressed_proof {:?}", syms);
+                return Ok(Proof::Uncompressed { syms: syms })
+            },
+            Rule::compressed_proof => {
+                println!("  compressed_proof {:?}", proof);
+                return Ok(Proof::Compressed { chars: proof.as_span().as_str().to_string() })
+            },
+            _ => {
+                return Err("Proof should be either uncompressed or compressed".to_string())
+            }
+        }
+    }
+    Err("Proof not found".to_string())
+}
+
 pub fn parse_provable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse provable_stmt");
 
-    match parse_typed_symbols(stmt, &program) {
+    match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
             println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
-            match add_label(&label, program) {
-                Ok(mut program) => {
-                    program.provables.insert(label, typed_symbols);
-                    Ok(program)
+            match parse_proof(&stmt) {
+                Ok(proof) => {
+                    match add_label(&label, program) {
+                        Ok(mut program) => {
+                            program.provables.insert(
+                                label, Provable {
+                                    ax: typed_symbols,
+                                    proof: proof,
+                                    scope: program.scope.clone()
+                                });
+                            Ok(program)
+                        },
+                        Err(e) => Err(e)
+                    }
                 },
                 Err(e) => Err(e)
             }

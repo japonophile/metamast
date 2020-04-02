@@ -259,3 +259,13 @@ fn test_parse_assertions() {
     assert_eq!(result.err(), Some("Variable y matches an existing label".to_string()));
 }
 
+#[test]
+fn mandatory_elements() {
+    // The set of mandatory variables associated with an assertion is the set
+    // of (zero or more) variables in the assertion and in any active $e statements.
+    let program = parse_program(
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
+    assert!(program.axioms.contains_key(&"ax1".to_string()));
+    println!("AXIOM1 {:?}", program.axioms[&"ax1".to_string()]);
+    // (is (= #{"x" "z"} (mandatory-variables (get (:axioms state) "ax1")))))
+}
