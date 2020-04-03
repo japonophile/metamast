@@ -2,6 +2,7 @@ use pest::Parser;
 use pest::iterators::Pair;
 use regex::Regex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 use crate::io::{IO, FileIO};
@@ -265,10 +266,10 @@ pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
                                              variable, typecode)),
         _ => {}
     }
-    if program.vartypes.contains_key(&variable.to_string()) &&
-        program.vartypes[&variable.to_string()] != typecode {
+    if program.vartypes.contains_key(variable) &&
+        program.vartypes[variable] != typecode {
         return Err(format!("Variable {} was previously assigned type {}", variable,
-                           program.vartypes[&variable.to_string()]));
+                           program.vartypes[variable]));
     }
 
     println!("  {} {} {}", label, typecode, variable);
@@ -487,6 +488,25 @@ pub fn traverse_tree(tree: Pair<Rule>, program: Program) -> Result<Program, Stri
                 });
         }
     }
+}
+
+pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
+    let mut mvars = HashSet::new();
+
+    for s in axiom.ax.syms.iter() {
+        if axiom.scope.variables.contains(&s.to_string()) {
+            mvars.insert(s.to_string());
+        }
+    }
+    for e in axiom.scope.essentials.values() {
+        for s in e.syms.iter() {
+            if axiom.scope.variables.contains(&s.to_string()) {
+                mvars.insert(s.to_string());
+            }
+        }
+    }
+
+    mvars
 }
 
 pub fn parse_program(program: &str) -> Result<Program, String> {

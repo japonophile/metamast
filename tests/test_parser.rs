@@ -1,5 +1,6 @@
 use metamast::io::MockIO;
-use metamast::mm_parser::{strip_comments, load_includes, parse_program};
+use metamast::mm_parser::{strip_comments, load_includes, parse_program, mandatory_variables};
+use std::collections::HashSet;
 
 #[test]
 fn test_strip_comments() {
@@ -122,7 +123,7 @@ fn test_parse_hypotheses() {
     // A $f statement consists of a label, followed by $f, followed by its typecode
     // (an active constant), followed by an active variable, followed by the $. token.
     let program = parse_program("$c var c $.\n$v x $.\nvarx $f var x $.\n").unwrap();
-    assert!(program.scope.floatings.contains_key(&"varx".to_string()));
+    assert!(program.scope.floatings.contains_key("varx"));
     let result = parse_program("$c var c $.\n$v x $.\nvarx $f bar x $.\n");
     assert_eq!(result.err(), Some("Type bar not found in constants".to_string()));
     let result = parse_program("$c var c $.\n$v x $.\nvarx $f var y $.\n");
@@ -135,9 +136,9 @@ fn test_parse_hypotheses() {
     // by the $. token.
     let program = parse_program(
         "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e var x a a $.\n").unwrap();
-    assert!(program.scope.essentials.contains_key(&"ess1".to_string()));
+    assert!(program.scope.essentials.contains_key("ess1"));
     let program = parse_program("$c var $.\ness1 $e var $.\n").unwrap();
-    assert!(program.scope.essentials.contains_key(&"ess1".to_string()));
+    assert!(program.scope.essentials.contains_key("ess1"));
     let result = parse_program(
         "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e bar x a a $.\n");
     assert_eq!(result.err(), Some("Type bar not found in constants".to_string()));
@@ -198,10 +199,10 @@ fn test_parse_assertions() {
     // followed by the $. token.
     let program = parse_program(
         "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\n").unwrap();
-    assert!(program.axioms.contains_key(&"ax1".to_string()));
+    assert!(program.axioms.contains_key("ax1"));
     let program = parse_program(
         "$c var wff = $.\n$v x $.\nvarx $f var x $.\nax1 $a wff = x x $.\n").unwrap();
-    assert!(program.axioms.contains_key(&"ax1".to_string()));
+    assert!(program.axioms.contains_key("ax1"));
     let result = parse_program("$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a woof x $.\n");
     assert_eq!(result.err(), Some("Type woof not found in constants".to_string()));
     let result = parse_program("$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff y $.\n");
@@ -212,10 +213,10 @@ fn test_parse_assertions() {
     // followed by $=, followed by a sequence of labels, followed by the $. token.
     let program = parse_program(
         "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p wff x $= dum dum $.\n").unwrap();
-    assert!(program.provables.contains_key(&"p1".to_string()));
+    assert!(program.provables.contains_key("p1"));
     let program = parse_program(
         "$c var wff = $.\n$v x $.\nvarx $f var x $.\nding $a var x $.\ndong $a wff x $.\np1 $p wff = x x $= ding dong $.\n").unwrap();
-    assert!(program.provables.contains_key(&"p1".to_string()));
+    assert!(program.provables.contains_key("p1"));
     let result = parse_program(
         "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p woof x $= dum dum $.\n");
     assert_eq!(result.err(), Some("Type woof not found in constants".to_string()));
@@ -265,7 +266,14 @@ fn mandatory_elements() {
     // of (zero or more) variables in the assertion and in any active $e statements.
     let program = parse_program(
         "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
-    assert!(program.axioms.contains_key(&"ax1".to_string()));
-    println!("AXIOM1 {:?}", program.axioms[&"ax1".to_string()]);
-    // (is (= #{"x" "z"} (mandatory-variables (get (:axioms state) "ax1")))))
+    let mvars: HashSet<String> =
+        ["x".to_string(), "z".to_string()].iter().cloned().collect();
+    assert_eq!(mvars, mandatory_variables(&program.axioms["ax1"]));
+
+    let program = parse_program(
+        "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n").unwrap();
+    let mvars: HashSet<String> =
+        ["x".to_string(), "y".to_string(), "z".to_string()].iter().cloned().collect();
+    assert_eq!(mvars, mandatory_variables(&program.axioms["ax1"]));
 }
+
