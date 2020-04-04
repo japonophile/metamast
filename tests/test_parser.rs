@@ -1,5 +1,6 @@
 use metamast::io::MockIO;
-use metamast::mm_parser::{strip_comments, load_includes, parse_program, mandatory_variables};
+use metamast::mm_parser::{strip_comments, load_includes, parse_program,
+                          mandatory_variables, mandatory_hypotheses};
 use std::collections::HashSet;
 
 #[test]
@@ -236,7 +237,8 @@ fn test_parse_assertions() {
         "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\nax1 $a wff $.\n");
     assert_eq!(result.err(), Some("Label ax1 was already defined before".to_string()));
     let result = parse_program(
-        "$c var wff $.\n$v x $.\n${ varx $f var x $.\nax1 $a wff x $. $}\nvarxx $f var x $.\nax1 $a wff $.\n");
+        "$c var wff $.\n$v x $.\n${ varx $f var x $.\nax1 $a wff x $. $}\n\
+        varxx $f var x $.\nax1 $a wff $.\n");
     assert_eq!(result.err(), Some("Label ax1 was already defined before".to_string()));
     let result = parse_program(
         "$c var wff $.\n$v x $.\nvarx $f var x $.\np1 $p wff x $= wff $.\np1 $p wff $= wff $.\n");
@@ -265,15 +267,46 @@ fn mandatory_elements() {
     // The set of mandatory variables associated with an assertion is the set
     // of (zero or more) variables in the assertion and in any active $e statements.
     let program = parse_program(
-        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
-    let mvars: HashSet<String> =
-        ["x".to_string(), "z".to_string()].iter().cloned().collect();
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\n\
+        varz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
+    let mvars: HashSet<String> = ["x", "z"].iter().map(|s| s.to_string()).collect();
     assert_eq!(mvars, mandatory_variables(&program.axioms["ax1"]));
 
     let program = parse_program(
-        "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n").unwrap();
-    let mvars: HashSet<String> =
-        ["x".to_string(), "y".to_string(), "z".to_string()].iter().cloned().collect();
+        "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\n\
+        vary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\n\
+        ax1 $a wff = x z $.\n").unwrap();
+    let mvars: HashSet<String> = ["x", "y", "z"].iter().map(|s| s.to_string()).collect();
     assert_eq!(mvars, mandatory_variables(&program.axioms["ax1"]));
+
+    // The (possibly empty) set of mandatory hypotheses is the set of all active
+    // $f statements containing mandatory variables, together with all active $e statements.
+    let program = parse_program(
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\n\
+        varz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
+    let mhyps: Vec<String> = ["varx", "varz"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+
+    let program = parse_program(
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\n\
+        vary $f var y $.\nvarz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
+    let mhyps: Vec<String> = ["varx", "varz"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+
+    let program = parse_program(
+        "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\n\
+        vary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\n\
+        ax1 $a wff = x z $.\n").unwrap();
+    let mhyps: Vec<String> =
+        ["varx", "vary", "varz", "min"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+
+    let program = parse_program(
+        "$c var wff = $.\n$v n x y z $.\nvary $f var y $.\n\
+        varx $f var x $.\nmin $e wff = x y $.\nvarz $f var z $.\n\
+        ax1 $a wff = x z $.\n").unwrap();
+    let mhyps: Vec<String> =
+        ["vary", "varx", "min", "varz"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
 }
 

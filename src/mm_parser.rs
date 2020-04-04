@@ -248,7 +248,6 @@ pub fn get_variable_type(variable: &str, program: &Program) -> Option<String> {
 
 pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     println!("Parse floating_stmt");
-    let mut program = program;
     let mut children = stmt.into_inner();
 
     let label = children.next().unwrap().as_span().as_str().to_string();
@@ -273,11 +272,15 @@ pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     }
 
     println!("  {} {} {}", label, typecode, variable);
-    program.scope.floatings.insert(label, Floating {
-        typ: typecode.to_string(), var: variable.to_string() });
-    program.vartypes.insert(variable.to_string(), typecode.to_string());
-
-    Ok(program)
+    match add_label(&label, program) {
+        Ok(mut program) => {
+            program.scope.floatings.insert(label, Floating {
+                typ: typecode.to_string(), var: variable.to_string() });
+            program.vartypes.insert(variable.to_string(), typecode.to_string());
+            Ok(program)
+        },
+        Err(e) => Err(e)
+    }
 }
 
 pub fn parse_typed_symbols(stmt: &Pair<Rule>, program: &Program) -> Result<(String, TypedSymbols), String> {
@@ -507,6 +510,25 @@ pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
     }
 
     mvars
+}
+
+pub fn mandatory_hypotheses(axiom: &Axiom, labels: Vec<String>) -> Vec<String> {
+    let mut mhyps = HashSet::new();
+
+    let mvars = mandatory_variables(axiom);
+    for (label, f) in axiom.scope.floatings.iter() {
+        if mvars.contains(&f.var) {
+            mhyps.insert(label.to_string());
+        }
+    }
+    for label in axiom.scope.essentials.keys() {
+        mhyps.insert(label.to_string());
+    }
+
+    let mut sorted_mhyps: Vec<String> = mhyps.iter().cloned().collect();
+    sorted_mhyps.sort_by_key(|k| labels.iter().position(|l| l == k).unwrap());
+
+    sorted_mhyps
 }
 
 pub fn parse_program(program: &str) -> Result<Program, String> {
