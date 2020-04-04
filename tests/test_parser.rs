@@ -1,6 +1,6 @@
 use metamast::io::MockIO;
 use metamast::mm_parser::{strip_comments, load_includes, parse_program,
-                          mandatory_variables, mandatory_hypotheses};
+                          mandatory_variables, mandatory_hypotheses, mandatory_disjoints};
 use std::collections::HashSet;
 
 #[test]
@@ -213,13 +213,16 @@ fn test_parse_assertions() {
     // (an active constant), followed by zero or more active math symbols,
     // followed by $=, followed by a sequence of labels, followed by the $. token.
     let program = parse_program(
-        "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p wff x $= dum dum $.\n").unwrap();
+        "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\n\
+        p1 $p wff x $= dum dum $.\n").unwrap();
     assert!(program.provables.contains_key("p1"));
     let program = parse_program(
-        "$c var wff = $.\n$v x $.\nvarx $f var x $.\nding $a var x $.\ndong $a wff x $.\np1 $p wff = x x $= ding dong $.\n").unwrap();
+        "$c var wff = $.\n$v x $.\nvarx $f var x $.\nding $a var x $.\n\
+        dong $a wff x $.\np1 $p wff = x x $= ding dong $.\n").unwrap();
     assert!(program.provables.contains_key("p1"));
     let result = parse_program(
-        "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p woof x $= dum dum $.\n");
+        "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\n\
+        p1 $p woof x $= dum dum $.\n");
     assert_eq!(result.err(), Some("Type woof not found in constants".to_string()));
 
     // Each variable in a $e, $a, or $p statement must exist in an active $f statement.
@@ -308,5 +311,29 @@ fn mandatory_elements() {
     let mhyps: Vec<String> =
         ["vary", "varx", "min", "varz"].iter().map(|s| s.to_string()).collect();
     assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+
+    // The set of mandatory $d statements associated with an assertion
+    // are those active $d statements whose variables are both among
+    // the assertion’s mandatory variables.
+    let program = parse_program(
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\n\
+        $d x y $.\n$d y z $.\n$d x z $.\nax1 $a wff = x z $.\n").unwrap();
+    let mdisjs: HashSet<(String, String)> =
+        [("x".to_string(), "z".to_string())].iter().cloned().collect();
+    assert_eq!(mdisjs, mandatory_disjoints(&program.axioms["ax1"]));
+
+    let program = parse_program(
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\n\
+        $d x y $.\n$d y z $.\nmin $e wff = x z $.\nax1 $a wff = x z $.\n").unwrap();
+    let mdisjs = HashSet::new();
+    assert_eq!(mdisjs, mandatory_disjoints(&program.axioms["ax1"]));
+
+    let program = parse_program(
+        "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvary $f var y $.\n\
+        varz $f var z $.\n$d x y $.\n$d y z $.\n$d x z $.\nmin $e = y y $.\n\
+        ax1 $a wff = x z $.\n").unwrap();
+    let mdisjs: HashSet<(String, String)> = [("x", "y"), ("x", "z"), ("y", "z")
+        ].iter().map(|(v1, v2)| (v1.to_string(), v2.to_string())).collect();
+    assert_eq!(mdisjs, mandatory_disjoints(&program.axioms["ax1"]));
 }
 

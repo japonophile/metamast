@@ -198,18 +198,18 @@ pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     println!("Parse constant_stmt");
     let mut program = program;
     for constant in stmt.into_inner() {
-        let c = constant.as_span().as_str();
-        if program.constants.contains(&c.to_string()) {
+        let c = constant.as_span().as_str().to_string();
+        if program.constants.contains(&c) {
             return Err(format!("Constant {} was already defined before", c));
         }
-        if program.variables.contains(&c.to_string()) {
+        if program.variables.contains(&c) {
             return Err(format!("Constant {} was previously defined as a variable", c));
         }
-        if program.labels.contains(&c.to_string()) {
+        if program.labels.contains(&c) {
             return Err(format!("Constant {} matches an existing label", c));
         }
         println!("  Constant: {}", c);
-        program.constants.push(c.to_string());
+        program.constants.push(c);
     }
     Ok(program)
 }
@@ -218,19 +218,19 @@ pub fn parse_variable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     println!("Parse variable_stmt");
     let mut program = program;
     for variable in stmt.into_inner() {
-        let v = variable.as_span().as_str();
-        if program.scope.variables.contains(&v.to_string()) {
+        let v = variable.as_span().as_str().to_string();
+        if program.scope.variables.contains(&v) {
             return Err(format!("Variable {} was already defined before", v));
         }
-        if program.constants.contains(&v.to_string()) {
+        if program.constants.contains(&v) {
             return Err(format!("Variable {} matches an existing constant", v));
         }
-        if program.labels.contains(&v.to_string()) {
+        if program.labels.contains(&v) {
             return Err(format!("Variable {} matches an existing label", v));
         }
         println!("  Variable: {}", v);
         program.scope.variables.push(v.to_string());
-        if !program.variables.contains(&v.to_string()) {
+        if !program.variables.contains(&v) {
             program.variables.push(v.to_string());
         }
     }
@@ -251,13 +251,13 @@ pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     let mut children = stmt.into_inner();
 
     let label = children.next().unwrap().as_span().as_str().to_string();
-    let typecode = children.next().unwrap().as_span().as_str();
-    let variable = children.next().unwrap().as_span().as_str();
+    let typecode = children.next().unwrap().as_span().as_str().to_string();
+    let variable = children.next().unwrap().as_span().as_str().to_string();
 
-    if !program.constants.contains(&typecode.to_string()) {
+    if !program.constants.contains(&typecode) {
         return Err(format!("Type {} not found in constants", typecode));
     }
-    if !program.scope.variables.contains(&variable.to_string()) {
+    if !program.scope.variables.contains(&variable) {
         return Err(format!("Variable {} not defined", variable));
     }
     match get_variable_type(&variable, &program) {
@@ -265,10 +265,10 @@ pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
                                              variable, typecode)),
         _ => {}
     }
-    if program.vartypes.contains_key(variable) &&
-        program.vartypes[variable] != typecode {
+    if program.vartypes.contains_key(&variable) &&
+        program.vartypes[&variable] != typecode {
         return Err(format!("Variable {} was previously assigned type {}", variable,
-                           program.vartypes[variable]));
+                           program.vartypes[&variable]));
     }
 
     println!("  {} {} {}", label, typecode, variable);
@@ -297,14 +297,14 @@ pub fn parse_typed_symbols(stmt: &Pair<Rule>, program: &Program) -> Result<(Stri
         if sym.as_rule() != Rule::math_symbol {
             continue
         }
-        let s = sym.as_span().as_str();
+        let s = sym.as_span().as_str().to_string();
         syms.push(s.to_string());
-        if program.scope.variables.contains(&s.to_string()) {
+        if program.scope.variables.contains(&s) {
             if get_variable_type(&s, &program).is_none() {
                 return Err(format!("Variable {} must be assigned a type", s));
             }
         }
-        else if !program.constants.contains(&s.to_string()) {
+        else if !program.constants.contains(&s) {
            return Err(format!("Variable or constant {} not defined", s));
         }
     }
@@ -313,16 +313,17 @@ pub fn parse_typed_symbols(stmt: &Pair<Rule>, program: &Program) -> Result<(Stri
 }
 
 pub fn add_label(label: &str, mut program: Program) -> Result<Program, String> {
-    if program.labels.contains(&label.to_string()) {
+    let label = label.to_string();
+    if program.labels.contains(&label) {
        return Err(format!("Label {} was already defined before", label));
     }
-    if program.constants.contains(&label.to_string()) {
+    if program.constants.contains(&label) {
        return Err(format!("Label {} matches a constant", label));
     }
-    if program.variables.contains(&label.to_string()) {
+    if program.variables.contains(&label) {
        return Err(format!("Label {} matches a variable", label));
     }
-    program.labels.push(label.to_string());
+    program.labels.push(label);
     Ok(program)
 }
 
@@ -351,11 +352,11 @@ pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
 
     let mut vars = vec![];
     for var in children {
-        let v = var.as_span().as_str();
-        if vars.contains(&v.to_string()) {
+        let v = var.as_span().as_str().to_string();
+        if vars.contains(&v) {
            return Err(format!("Variable {} appears more than once in a disjoint statement", v));
         }
-        if !program.scope.variables.contains(&v.to_string()) {
+        if !program.scope.variables.contains(&v) {
             return Err(format!("Variable {} not active", v));
         }
         vars.push(v.to_string());
@@ -497,13 +498,13 @@ pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
     let mut mvars = HashSet::new();
 
     for s in axiom.ax.syms.iter() {
-        if axiom.scope.variables.contains(&s.to_string()) {
+        if axiom.scope.variables.contains(&s) {
             mvars.insert(s.to_string());
         }
     }
     for e in axiom.scope.essentials.values() {
         for s in e.syms.iter() {
-            if axiom.scope.variables.contains(&s.to_string()) {
+            if axiom.scope.variables.contains(&s) {
                 mvars.insert(s.to_string());
             }
         }
@@ -529,6 +530,19 @@ pub fn mandatory_hypotheses(axiom: &Axiom, labels: Vec<String>) -> Vec<String> {
     sorted_mhyps.sort_by_key(|k| labels.iter().position(|l| l == k).unwrap());
 
     sorted_mhyps
+}
+
+pub fn mandatory_disjoints(axiom: &Axiom) -> HashSet<(String, String)> {
+    let mut mdisjs = HashSet::new();
+
+    let mvars = mandatory_variables(axiom);
+    for (v1, v2) in axiom.scope.disjoints.iter() {
+        if mvars.contains(v1) && mvars.contains(v2) {
+            mdisjs.insert((v1.to_string(), v2.to_string()));
+        }
+    }
+
+    mdisjs
 }
 
 pub fn parse_program(program: &str) -> Result<Program, String> {
