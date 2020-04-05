@@ -1,10 +1,11 @@
 use metamast::io::MockIO;
 use metamast::mm_parser::{strip_comments, load_includes, parse_program,
-                          mandatory_variables, mandatory_hypotheses, mandatory_disjoints};
+                          mandatory_variables, mandatory_hypotheses, mandatory_disjoints,
+                          verify_proof, verify_proofs};
 use std::collections::HashSet;
 
 #[test]
-fn test_strip_comments() {
+fn test_01_strip_comments() {
     // The token $( begins a comment and $) ends a comment.
     // Comments are ignored (treated like white space) for the purpose of parsing.
     let text = strip_comments("$c wff $.\n$( comment $)\n$v x $.\n");
@@ -28,7 +29,7 @@ fn test_strip_comments() {
 }
 
 #[test]
-fn test_load_includes() {
+fn test_02_load_includes() {
     let mut mock = MockIO::new();
     mock.expect_slurp()
         .returning(
@@ -83,7 +84,7 @@ fn test_load_includes() {
 }
 
 #[test]
-fn test_parse_constants_variables() {
+fn test_03_parse_constants_variables() {
     // The same math symbol may not occur twice in a given $v or $c statement
     let result = parse_program("$c c c $.\n");
     assert_eq!(result.err(), Some("Constant c was already defined before".to_string()));
@@ -120,7 +121,7 @@ fn test_parse_constants_variables() {
 }
 
 #[test]
-fn test_parse_hypotheses() {
+fn test_04_parse_hypotheses() {
     // A $f statement consists of a label, followed by $f, followed by its typecode
     // (an active constant), followed by an active variable, followed by the $. token.
     let program = parse_program("$c var c $.\n$v x $.\nvarx $f var x $.\n").unwrap();
@@ -168,7 +169,7 @@ fn test_parse_hypotheses() {
 }
 
 #[test]
-fn test_parse_disjoints() {
+fn test_05_parse_disjoints() {
     // A simple $d statement consists of $d, followed by two different
     // active variables, followed by the $. token.
     let program = parse_program("$v x y $.\n$d x y $.\n").unwrap();
@@ -194,7 +195,7 @@ fn test_parse_disjoints() {
 }
 
 #[test]
-fn test_parse_assertions() {
+fn test_06_parse_assertions() {
     // A $a statement consists of a label, followed by $a, followed by its typecode
     // (an active constant), followed by zero or more active math symbols,
     // followed by the $. token.
@@ -266,7 +267,7 @@ fn test_parse_assertions() {
 }
 
 #[test]
-fn mandatory_elements() {
+fn test_07_mandatory_elements() {
     // The set of mandatory variables associated with an assertion is the set
     // of (zero or more) variables in the assertion and in any active $e statements.
     let program = parse_program(
@@ -288,13 +289,13 @@ fn mandatory_elements() {
         "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\n\
         varz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
     let mhyps: Vec<String> = ["varx", "varz"].iter().map(|s| s.to_string()).collect();
-    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], &program.labels));
 
     let program = parse_program(
         "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\n\
         vary $f var y $.\nvarz $f var z $.\nax1 $a wff = x z $.\n").unwrap();
     let mhyps: Vec<String> = ["varx", "varz"].iter().map(|s| s.to_string()).collect();
-    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], &program.labels));
 
     let program = parse_program(
         "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\n\
@@ -302,7 +303,7 @@ fn mandatory_elements() {
         ax1 $a wff = x z $.\n").unwrap();
     let mhyps: Vec<String> =
         ["varx", "vary", "varz", "min"].iter().map(|s| s.to_string()).collect();
-    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], &program.labels));
 
     let program = parse_program(
         "$c var wff = $.\n$v n x y z $.\nvary $f var y $.\n\
@@ -310,7 +311,7 @@ fn mandatory_elements() {
         ax1 $a wff = x z $.\n").unwrap();
     let mhyps: Vec<String> =
         ["vary", "varx", "min", "varz"].iter().map(|s| s.to_string()).collect();
-    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], program.labels));
+    assert_eq!(mhyps, mandatory_hypotheses(&program.axioms["ax1"], &program.labels));
 
     // The set of mandatory $d statements associated with an assertion
     // are those active $d statements whose variables are both among
@@ -335,5 +336,55 @@ fn mandatory_elements() {
     let mdisjs: HashSet<(String, String)> = [("x", "y"), ("x", "z"), ("y", "z")
         ].iter().map(|(v1, v2)| (v1.to_string(), v2.to_string())).collect();
     assert_eq!(mdisjs, mandatory_disjoints(&program.axioms["ax1"]));
+}
+
+#[test]
+fn test_08_proof_verification() {
+    // Checking variable types
+    let program_text = "
+        $c ( ) -> wff wff2 $.
+        $v p q r s $.
+        wp $f wff p $.
+        wq $f wff2 q $.
+        wr $f wff r $.
+        ws $f wff s $.
+        w2 $a wff ( p -> q ) $.
+        wnew $p wff ( s -> ( r -> p ) ) $= ws wr wp w2 w2 $. ";
+    let program = parse_program(program_text).unwrap();
+    assert_eq!(Err("Incorrect type when trying to substitute \
+                   variable 'q' by 'p' (got wff, expected wff2)".to_string()),
+               verify_proof(&program.provables["wnew"], &program));
+
+    // Sample of 'The anatomy of a proof'
+    let program_text = "
+        $c ( ) -> wff $.
+        $v p q r s $.
+        wp $f wff p $.
+        wq $f wff q $.
+        wr $f wff r $.
+        ws $f wff s $.
+        w2 $a wff ( p -> q ) $.
+        wnew $p wff ( s -> ( r -> p ) ) $= ws wr wp w2 w2 $. ";
+    let program = parse_program(program_text).unwrap();
+    assert!(verify_proofs(&program));
+
+    // MIU less trivial theorem
+    let program_text = "
+        $c M I U |- wff $.
+        $v x $.
+        wx $f wff x $.
+        we $a wff $.
+        wM $a wff x M $.
+        wI $a wff x I $.
+        ax $a |- M I $.
+        ${
+          IIa $e |- M x $.
+          II  $a |- M x x $.
+        $}
+        lesstrivial $p |- M I I $=
+          we wI ax II
+        $. ";
+    let program = parse_program(program_text).unwrap();
+    assert!(verify_proofs(&program));
 }
 

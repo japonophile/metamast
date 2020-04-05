@@ -131,7 +131,7 @@ pub struct Scope {
 #[derive(Debug)]
 pub enum Proof {
     Uncompressed {
-        syms: Vec<String>
+        labels: Vec<String>
     },
     Compressed {
         chars: String
@@ -414,7 +414,7 @@ pub fn parse_proof(stmt: &Pair<Rule>) -> Result<Proof, String> {
                 let syms = proof.into_inner().fold(
                     vec![], |mut ss, s| { ss.push(s.as_span().as_str().to_string()); ss });
                 println!("  uncompressed_proof {:?}", syms);
-                return Ok(Proof::Uncompressed { syms: syms })
+                return Ok(Proof::Uncompressed { labels: syms })
             },
             Rule::compressed_proof => {
                 println!("  compressed_proof {:?}", proof);
@@ -494,6 +494,30 @@ pub fn traverse_tree(tree: Pair<Rule>, program: Program) -> Result<Program, Stri
     }
 }
 
+pub fn parse_program(program: &str) -> Result<Program, String> {
+    println!("Parse program");
+    let mut result = MetamathParser::parse(Rule::database, program);
+    match result {
+        Ok(ref mut tree) => {
+            println!("Result: {:?}", tree);
+            return traverse_tree(tree.next().unwrap(), Program {
+                constants: vec![],
+                variables: vec![],
+                vartypes: HashMap::new(),
+                labels: vec![],
+                axioms: HashMap::new(),
+                provables: HashMap::new(),
+                scope: Scope {
+                    variables: vec![],
+                    floatings: HashMap::new(),
+                    essentials: HashMap::new(),
+                    disjoints: vec![]
+                } });
+        },
+        _ => Err("Parse error".to_string())
+    }
+}
+
 pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
     let mut mvars = HashSet::new();
 
@@ -513,7 +537,7 @@ pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
     mvars
 }
 
-pub fn mandatory_hypotheses(axiom: &Axiom, labels: Vec<String>) -> Vec<String> {
+pub fn mandatory_hypotheses(axiom: &Axiom, labels: &Vec<String>) -> Vec<String> {
     let mut mhyps = HashSet::new();
 
     let mvars = mandatory_variables(axiom);
@@ -545,28 +569,131 @@ pub fn mandatory_disjoints(axiom: &Axiom) -> HashSet<(String, String)> {
     mdisjs
 }
 
-pub fn parse_program(program: &str) -> Result<Program, String> {
-    println!("Parse program");
-    let mut result = MetamathParser::parse(Rule::database, program);
-    match result {
-        Ok(ref mut tree) => {
-            println!("Result: {:?}", tree);
-            return traverse_tree(tree.next().unwrap(), Program {
-                constants: vec![],
-                variables: vec![],
-                vartypes: HashMap::new(),
-                labels: vec![],
-                axioms: HashMap::new(),
-                provables: HashMap::new(),
-                scope: Scope {
-                    variables: vec![],
-                    floatings: HashMap::new(),
-                    essentials: HashMap::new(),
-                    disjoints: vec![]
-                } });
-        },
-        _ => Err("Parse error".to_string())
+pub fn decompress_proof(proof: &Proof) -> Vec<String> {
+    match proof {
+        Proof::Uncompressed { labels } => labels.clone(),
+        Proof::Compressed { chars: _ } => vec![]
     }
+}
+
+pub fn apply_substitutions(subst: &HashMap<String, Vec<String>>, syms: &Vec<String>, constants: &Vec<String>) -> Vec<String> {
+    let mut subst_syms = vec![];
+    for s in syms {
+        if constants.contains(&s) {
+            subst_syms.push(s.to_string());
+            continue;
+        }
+        subst_syms.extend_from_slice(&subst[&s.to_string()]);
+    }
+    subst_syms
+}
+
+pub fn find_substitutions(stack: &Vec<TypedSymbols>, mhyps: &Vec<String>, scope: &Scope, constants: &Vec<String>) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut subst = HashMap::new();
+    let mut i = stack.len() - mhyps.len();
+    for label in mhyps {
+        let l = label.to_string();
+        let target = &stack[i];
+        if scope.floatings.contains_key(&l) {
+            let f = &scope.floatings[&l];
+            if f.typ != target.typ {
+                return Err(format!("Incorrect type when trying to substitute variable \
+                                   '{}' by '{}' (got {}, expected {})",
+                                   f.var, target.syms.join(" "), target.typ, f.typ));
+            }
+            subst.insert(f.var.to_string(), target.syms.clone());
+        }
+        else if scope.essentials.contains_key(&l) {
+            let e = &scope.essentials[&l];
+            if e.typ != target.typ {
+                return Err(format!("Incorrect type for essential hypothesis \
+                                   '{}' (got {}, expected {})",
+                                   l, target.typ, e.typ));
+            }
+            let subst_syms = apply_substitutions(&subst, &e.syms, &constants);
+            if subst_syms != target.syms {
+                return Err(format!("Mismatch after substitution in essential hypothesis \
+                                   '{}' (got '{}', expected '{}')",
+                                   l, target.syms.join(" "), subst_syms.join(" ")));
+            }
+        }
+        i = i + 1;
+    }
+    println!("Substitutions: {:?}", subst);
+    Ok(subst)
+}
+
+pub fn check_disjoint_restrictions() {
+}
+
+pub fn apply_axiom(axiom: &Axiom, program: &Program, mut stack: Vec<TypedSymbols>) -> Result<Vec<TypedSymbols>, String> {
+    let mhyps = mandatory_hypotheses(axiom, &program.labels);
+    if stack.len() < mhyps.len() {
+        return Err("Not enough items on the stack".to_string());
+    }
+    let n = stack.len() - mhyps.len();
+    let (remaining_stack, substack) = stack.split_at_mut(n);
+    match find_substitutions(&substack.to_vec(), &mhyps, &axiom.scope, &program.constants) {
+        Ok(subst) => {
+            check_disjoint_restrictions();  // TODO
+            let subst_syms = apply_substitutions(&subst, &axiom.ax.syms, &program.constants);
+            let mut new_stack = remaining_stack.to_vec();
+            new_stack.push(TypedSymbols { typ: axiom.ax.typ.to_string(), syms: subst_syms });
+            Ok(new_stack)
+        },
+        Err(e) => Err(e)
+    }
+}
+
+pub fn verify_proof(provable: &Provable, program: &Program) -> Result<(), String> {
+    let mut stack = vec![];
+    let proof_labels = decompress_proof(&provable.proof);
+    let scope = &provable.scope;
+
+    for label in proof_labels {
+        if scope.floatings.contains_key(&label) {
+            let f = &scope.floatings[&label];
+            stack.push(TypedSymbols { typ: f.typ.to_string(), syms: vec![f.var.to_string()] });
+            continue
+        }
+        if scope.essentials.contains_key(&label) {
+            stack.push(scope.essentials[&label].clone());
+            continue
+        }
+        if program.axioms.contains_key(&label) {
+            match apply_axiom(&program.axioms[&label], &program, stack) {
+                Ok(updated_stack) => stack = updated_stack,
+                Err(e) => return Err(e)
+            }
+        }
+    }
+
+    if stack.len() > 1 {
+        return Err("Too many items left in the stack".to_string());
+    }
+    match stack.pop() {
+        Some(proof_result) => {
+            if proof_result.typ != provable.ax.typ ||
+               proof_result.syms != provable.ax.syms {
+                return Err(format!("Proof result {:?} does not match assertion {:?}",
+                                   proof_result, provable.ax));
+            }
+            return Ok(())
+        },
+        _ => {
+            return Err("No item left in the stack".to_string());
+        }
+    }
+}
+
+pub fn verify_proofs(program: &Program) -> bool {
+    program.provables.iter().all(|(l, p)| {
+        print!("Verifying {:?} ...", l);
+        match verify_proof(p, program) {
+            Ok(()) => { println!(" OK!"); true },
+            Err(e) => { println!(" FAILED ({})", e); false }
+        }
+    })
 }
 
 pub fn parse_metamath(filename: &str) {
