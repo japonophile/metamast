@@ -5,6 +5,7 @@ authors = ["Antoine Choppin <antoine@japonophile.com>"]
 edition = "2018"
 
 [dependencies]
+itertools = "0.7.8"
 pest = "2.0"
 pest_derive = "2.0"
 mockall = "0.6.0"

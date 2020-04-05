@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use pest::Parser;
 use pest::iterators::Pair;
 use regex::Regex;
@@ -363,18 +364,8 @@ pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     }
     vars.sort();
 
-    let (mut i, mut j, n) = (0, 1, vars.len());
-    loop {
-        println!("  {} {}", vars[i], vars[j]);
-        program.scope.disjoints.push((vars[i].to_string(), vars[j].to_string()));
-        j += 1;
-        if j >= n {
-            i += 1;
-            if i >= n - 1 {
-                break;
-            }
-            j = i + 1;
-        }
+    for (v1, v2) in vars.iter().tuple_combinations() {
+        program.scope.disjoints.push((v1.to_string(), v2.to_string()));
     }
 
     Ok(program)
@@ -619,14 +610,44 @@ pub fn find_substitutions(stack: &Vec<TypedSymbols>, mhyps: &Vec<String>, scope:
         }
         i = i + 1;
     }
-    println!("Substitutions: {:?}", subst);
     Ok(subst)
 }
 
-pub fn check_disjoint_restrictions() {
+pub fn are_expressions_disjoint(expr1: &Vec<String>, expr2: &Vec<String>, provable_vars: &Vec<String>, provable_disjs: &Vec<(String, String)>) -> bool {
+    let vars1 = expr1.into_iter().filter(|v| provable_vars.contains(&v)).collect_vec();
+    let vars2 = expr2.into_iter().filter(|v| provable_vars.contains(&v)).collect_vec();
+    let allpairs = vars2.iter().flat_map(|v2| vars1.iter().clone().map(move |v1| (v1.to_string(), v2.to_string())));
+    for vpair in allpairs {
+        if !provable_disjs.contains(&vpair) {
+            return false;
+        }
+    }
+    true
 }
 
-pub fn apply_axiom(axiom: &Axiom, program: &Program, mut stack: Vec<TypedSymbols>) -> Result<Vec<TypedSymbols>, String> {
+pub fn is_disjoint_restriction_verified(vpair: (&str, &str), mdisjs: &HashSet<(String, String)>, provable_scope: &Scope, subst: &HashMap<String, Vec<String>>) -> bool {
+    let (v1, v2) = vpair;
+    let vpair = (v1.to_string(), v2.to_string());
+    let (v1, v2) = (v1.to_string(), v2.to_string());
+    if mdisjs.contains(&vpair) && subst.contains_key(&v1) && subst.contains_key(&v2) {
+        let (expr1, expr2) = (subst[&v1].to_vec(), subst[&v2].to_vec());
+        return are_expressions_disjoint(&expr1, &expr2, &provable_scope.variables, &provable_scope.disjoints);
+    }
+    true
+}
+
+pub fn are_disjoint_restrictions_verified(axiom: &Axiom, provable_scope: &Scope, subst: &HashMap<String, Vec<String>>) -> bool {
+    let mvars = mandatory_variables(axiom);
+    let mdisjs = mandatory_disjoints(axiom);
+    for (v1, v2) in mvars.iter().tuple_combinations() {
+        if !is_disjoint_restriction_verified((v1, v2), &mdisjs, provable_scope, subst) {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn apply_axiom(axiom: &Axiom, provable_scope: &Scope, program: &Program, mut stack: Vec<TypedSymbols>) -> Result<Vec<TypedSymbols>, String> {
     let mhyps = mandatory_hypotheses(axiom, &program.labels);
     if stack.len() < mhyps.len() {
         return Err("Not enough items on the stack".to_string());
@@ -635,11 +656,15 @@ pub fn apply_axiom(axiom: &Axiom, program: &Program, mut stack: Vec<TypedSymbols
     let (remaining_stack, substack) = stack.split_at_mut(n);
     match find_substitutions(&substack.to_vec(), &mhyps, &axiom.scope, &program.constants) {
         Ok(subst) => {
-            check_disjoint_restrictions();  // TODO
-            let subst_syms = apply_substitutions(&subst, &axiom.ax.syms, &program.constants);
-            let mut new_stack = remaining_stack.to_vec();
-            new_stack.push(TypedSymbols { typ: axiom.ax.typ.to_string(), syms: subst_syms });
-            Ok(new_stack)
+            if are_disjoint_restrictions_verified(axiom, provable_scope, &subst) {
+                let subst_syms = apply_substitutions(&subst, &axiom.ax.syms, &program.constants);
+                let mut new_stack = remaining_stack.to_vec();
+                new_stack.push(TypedSymbols { typ: axiom.ax.typ.to_string(), syms: subst_syms });
+                Ok(new_stack)
+            }
+            else {
+                Err("Disjoint restriction violated".to_string())
+            }
         },
         Err(e) => Err(e)
     }
@@ -661,7 +686,7 @@ pub fn verify_proof(provable: &Provable, program: &Program) -> Result<(), String
             continue
         }
         if program.axioms.contains_key(&label) {
-            match apply_axiom(&program.axioms[&label], &program, stack) {
+            match apply_axiom(&program.axioms[&label], scope, &program, stack) {
                 Ok(updated_stack) => stack = updated_stack,
                 Err(e) => return Err(e)
             }
