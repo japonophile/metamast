@@ -406,5 +406,22 @@ fn test_08_proof_verification() {
     let program = parse_program(program_text).unwrap();
     assert_eq!(Err("Disjoint restriction violated".to_string()),
                verify_proof(&program.provables["axx"], &program));
+
+    let program_text = "
+        $c |- var ne $.
+        ${
+          $v x y $.
+          varx $f var x $. vary $f var y $.
+          $d x y $.
+          ax $a |- x ne y $.
+        $}
+        ${
+          $v a b $.
+          $d a b $.
+          vara $f var a $. varb $f var b $.
+          axx $p |- a ne b $= vara varb ax $.
+        $} ";
+    let program = parse_program(program_text).unwrap();
+    assert!(verify_proofs(&program));
 }
 

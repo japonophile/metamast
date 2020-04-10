@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
+use std::time::Instant;
 use crate::io::{IO, FileIO};
 
 #[derive(Parser)]
@@ -123,10 +124,10 @@ pub struct TypedSymbols {
 
 #[derive(Debug)]
 pub struct Scope {
-    pub variables: Vec<String>,
+    pub variables: HashSet<String>,
     pub floatings: HashMap<String, Floating>,
     pub essentials: HashMap<String, TypedSymbols>,
-    pub disjoints: Vec<(String, String)>
+    pub disjoints: HashSet<(String, String)>
 }
 
 #[derive(Debug)]
@@ -140,26 +141,22 @@ pub enum Proof {
 }
 
 #[derive(Debug)]
-pub struct Axiom {
+pub struct Assertion {
     pub ax: TypedSymbols,
-    pub scope: Scope
-}
-
-#[derive(Debug)]
-pub struct Provable {
-    pub ax: TypedSymbols,
-    pub proof: Proof,
+    pub proof: Option<Proof>,
     pub scope: Scope
 }
 
 pub struct Program {
-    pub constants: Vec<String>,
-    pub variables: Vec<String>,
+    pub constants: HashSet<String>,
+    pub variables: HashSet<String>,
     pub vartypes: HashMap<String, String>,
-    pub labels: Vec<String>,
-    pub axioms: HashMap<String, Axiom>,
-    pub provables: HashMap<String, Provable>,
-    pub scope: Scope
+    pub labels: HashMap<String, u32>,
+    pub axioms: HashMap<String, Assertion>,
+    pub provables: HashMap<String, Assertion>,
+    pub scope: Scope,
+    pub counters: HashMap<String, u32>,
+    pub timings: HashMap<String, u32>
 }
 
 impl Clone for TypedSymbols {
@@ -174,10 +171,10 @@ impl Clone for TypedSymbols {
 impl Clone for Scope {
     fn clone(&self) -> Scope {
         Scope {
-            variables: self.variables.to_vec(),
+            variables: self.variables.clone(),
             floatings: self.floatings.clone(),
             essentials: self.essentials.clone(),
-            disjoints: self.disjoints.to_vec()
+            disjoints: self.disjoints.clone()
         }
     }
 }
@@ -185,18 +182,23 @@ impl Clone for Scope {
 impl std::fmt::Display for Scope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Variables: {:?}\nFloatings: {:?}\nEssentials: {:?}\nDisjoints: {:?}",
-               self.variables, self.floatings, self.essentials, self.disjoints)
+               self.variables.len(), self.floatings.len(), self.essentials.len(), self.disjoints.len())
     }
 }
 
 impl std::fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Constants: {:?}, Scope: {}", self.constants, self.scope)
+        let mut s = "".to_string();
+        for (k, v) in self.counters.iter() {
+            s += format!("{} ({} msec * {}), ", k, self.timings[k] as f32 / self.counters[k] as f32, v).as_str();
+        }
+        write!(f, "Constants: {}, Variables: {}, Vartypes: {}, Labels: {}, Axioms: {}, Provables: {}\nTimings: {}", self.constants.len(), self.variables.len(), self.vartypes.keys().len(), self.labels.len(), self.axioms.keys().len(), self.provables.keys().len(), s)
     }
 }
 
 pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse constant_stmt");
+    // println!("Parse constant_stmt");
+    let now = Instant::now();
     let mut program = program;
     for constant in stmt.into_inner() {
         let c = constant.as_span().as_str().to_string();
@@ -206,17 +208,20 @@ pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
         if program.variables.contains(&c) {
             return Err(format!("Constant {} was previously defined as a variable", c));
         }
-        if program.labels.contains(&c) {
+        if program.labels.contains_key(&c) {
             return Err(format!("Constant {} matches an existing label", c));
         }
-        println!("  Constant: {}", c);
-        program.constants.push(c);
+        // println!("  Constant: {}", c);
+        program.constants.insert(c);
     }
+    *program.counters.entry("constant".to_string()).or_insert(0) += 1;
+    *program.timings.entry("constant".to_string()).or_insert(0) += now.elapsed().subsec_millis();
     Ok(program)
 }
 
 pub fn parse_variable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse variable_stmt");
+    // println!("Parse variable_stmt");
+    let now = Instant::now();
     let mut program = program;
     for variable in stmt.into_inner() {
         let v = variable.as_span().as_str().to_string();
@@ -226,15 +231,17 @@ pub fn parse_variable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
         if program.constants.contains(&v) {
             return Err(format!("Variable {} matches an existing constant", v));
         }
-        if program.labels.contains(&v) {
+        if program.labels.contains_key(&v) {
             return Err(format!("Variable {} matches an existing label", v));
         }
-        println!("  Variable: {}", v);
-        program.scope.variables.push(v.to_string());
+        // println!("  Variable: {}", v);
+        program.scope.variables.insert(v.to_string());
         if !program.variables.contains(&v) {
-            program.variables.push(v.to_string());
+            program.variables.insert(v.to_string());
         }
     }
+    *program.counters.entry("variable".to_string()).or_insert(0) += 1;
+    *program.timings.entry("variable".to_string()).or_insert(0) += now.elapsed().subsec_millis();
     Ok(program)
 }
 
@@ -248,7 +255,8 @@ pub fn get_variable_type(variable: &str, program: &Program) -> Option<String> {
 }
 
 pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse floating_stmt");
+    // println!("Parse floating_stmt");
+    let now = Instant::now();
     let mut children = stmt.into_inner();
 
     let label = children.next().unwrap().as_span().as_str().to_string();
@@ -272,12 +280,14 @@ pub fn parse_floating_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
                            program.vartypes[&variable]));
     }
 
-    println!("  {} {} {}", label, typecode, variable);
+    // println!("  {} {} {}", label, typecode, variable);
     match add_label(&label, program) {
         Ok(mut program) => {
             program.scope.floatings.insert(label, Floating {
                 typ: typecode.to_string(), var: variable.to_string() });
             program.vartypes.insert(variable.to_string(), typecode.to_string());
+            *program.counters.entry("floating".to_string()).or_insert(0) += 1;
+            *program.timings.entry("floating".to_string()).or_insert(0) += now.elapsed().subsec_millis();
             Ok(program)
         },
         Err(e) => Err(e)
@@ -315,7 +325,7 @@ pub fn parse_typed_symbols(stmt: &Pair<Rule>, program: &Program) -> Result<(Stri
 
 pub fn add_label(label: &str, mut program: Program) -> Result<Program, String> {
     let label = label.to_string();
-    if program.labels.contains(&label) {
+    if program.labels.contains_key(&label) {
        return Err(format!("Label {} was already defined before", label));
     }
     if program.constants.contains(&label) {
@@ -324,19 +334,22 @@ pub fn add_label(label: &str, mut program: Program) -> Result<Program, String> {
     if program.variables.contains(&label) {
        return Err(format!("Label {} matches a variable", label));
     }
-    program.labels.push(label);
+    program.labels.insert(label, program.labels.len() as u32);
     Ok(program)
 }
 
 pub fn parse_essential_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse essential_stmt");
+    // println!("Parse essential_stmt");
+    let now = Instant::now();
 
     match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
-            println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
+            // println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
             match add_label(&label, program) {
                 Ok(mut program) => {
                     program.scope.essentials.insert(label, typed_symbols);
+                    *program.counters.entry("essential".to_string()).or_insert(0) += 1;
+                    *program.timings.entry("essential".to_string()).or_insert(0) += now.elapsed().subsec_millis();
                     Ok(program)
                 },
                 Err(e) => Err(e)
@@ -347,7 +360,7 @@ pub fn parse_essential_stmt(stmt: Pair<Rule>, program: Program) -> Result<Progra
 }
 
 pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse disjoint_stmt");
+    // println!("Parse disjoint_stmt");
     let mut program = program;
     let children = stmt.into_inner();
 
@@ -365,22 +378,23 @@ pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     vars.sort();
 
     for (v1, v2) in vars.iter().tuple_combinations() {
-        program.scope.disjoints.push((v1.to_string(), v2.to_string()));
+        program.scope.disjoints.insert((v1.to_string(), v2.to_string()));
     }
 
     Ok(program)
 }
 
 pub fn parse_axiom_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse axiom_stmt");
+    // println!("Parse axiom_stmt");
 
     match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
-            println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
+            // println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
             match add_label(&label, program) {
                 Ok(mut program) => {
-                    program.axioms.insert(label, Axiom {
+                    program.axioms.insert(label, Assertion {
                         ax: typed_symbols,
+                        proof: None,
                         scope: program.scope.clone()
                     });
                     return Ok(program)
@@ -404,11 +418,11 @@ pub fn parse_proof(stmt: &Pair<Rule>) -> Result<Proof, String> {
             Rule::uncompressed_proof => {
                 let syms = proof.into_inner().fold(
                     vec![], |mut ss, s| { ss.push(s.as_span().as_str().to_string()); ss });
-                println!("  uncompressed_proof {:?}", syms);
+                // println!("  uncompressed_proof {:?}", syms);
                 return Ok(Proof::Uncompressed { labels: syms })
             },
             Rule::compressed_proof => {
-                println!("  compressed_proof {:?}", proof);
+                // println!("  compressed_proof {:?}", proof);
                 return Ok(Proof::Compressed { chars: proof.as_span().as_str().to_string() })
             },
             _ => {
@@ -420,19 +434,19 @@ pub fn parse_proof(stmt: &Pair<Rule>) -> Result<Proof, String> {
 }
 
 pub fn parse_provable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse provable_stmt");
+    // println!("Parse provable_stmt");
 
     match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
-            println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
+            // println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
             match parse_proof(&stmt) {
                 Ok(proof) => {
                     match add_label(&label, program) {
                         Ok(mut program) => {
                             program.provables.insert(
-                                label, Provable {
+                                label, Assertion {
                                     ax: typed_symbols,
-                                    proof: proof,
+                                    proof: Some(proof),
                                     scope: program.scope.clone()
                                 });
                             Ok(program)
@@ -448,7 +462,7 @@ pub fn parse_provable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
 }
 
 pub fn parse_block(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
-    println!("Parse block");
+    // println!("Parse block");
     let original_scope = program.scope.clone();
     let result = stmt.into_inner().fold(Ok(program),
     |p, rule| match p {
@@ -475,7 +489,7 @@ pub fn traverse_tree(tree: Pair<Rule>, program: Program) -> Result<Program, Stri
         Rule::axiom_stmt     => parse_axiom_stmt(tree, program),
         Rule::provable_stmt  => parse_provable_stmt(tree, program),
         _ => {
-            println!("Statement: {:?}", tree.as_rule());
+            // println!("Statement: {:?}", tree.as_rule());
             return tree.into_inner().fold(Ok(program),
                 |p, rule| match p {
                     Ok(prog) => traverse_tree(rule, prog),
@@ -485,41 +499,49 @@ pub fn traverse_tree(tree: Pair<Rule>, program: Program) -> Result<Program, Stri
     }
 }
 
-pub fn parse_program(program: &str) -> Result<Program, String> {
-    println!("Parse program");
-    let mut result = MetamathParser::parse(Rule::database, program);
+pub fn parse_program(program_text: &str) -> Result<Program, String> {
+    println!("Parsing program...");
+    let now = Instant::now();
+    let mut result = MetamathParser::parse(Rule::database, program_text);
     match result {
         Ok(ref mut tree) => {
-            println!("Result: {:?}", tree);
-            return traverse_tree(tree.next().unwrap(), Program {
-                constants: vec![],
-                variables: vec![],
+            println!(" . Program parsed in {} seconds.", now.elapsed().as_secs());
+            println!("Checking program...");
+            let now = Instant::now();
+            let program = traverse_tree(tree.next().unwrap(), Program {
+                constants: HashSet::new(),
+                variables: HashSet::new(),
                 vartypes: HashMap::new(),
-                labels: vec![],
+                labels: HashMap::new(),
                 axioms: HashMap::new(),
                 provables: HashMap::new(),
                 scope: Scope {
-                    variables: vec![],
+                    variables: HashSet::new(),
                     floatings: HashMap::new(),
                     essentials: HashMap::new(),
-                    disjoints: vec![]
-                } });
+                    disjoints: HashSet::new(),
+                },
+                counters: HashMap::new(),
+                timings: HashMap::new()
+            });
+            println!(" . Program checked in {} seconds.", now.elapsed().as_secs());
+            program
         },
         _ => Err("Parse error".to_string())
     }
 }
 
-pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
+pub fn mandatory_variables(axiom: &Assertion) -> HashSet<String> {
     let mut mvars = HashSet::new();
 
     for s in axiom.ax.syms.iter() {
-        if axiom.scope.variables.contains(&s) {
+        if axiom.scope.variables.contains(&s.to_string()) {
             mvars.insert(s.to_string());
         }
     }
     for e in axiom.scope.essentials.values() {
         for s in e.syms.iter() {
-            if axiom.scope.variables.contains(&s) {
+            if axiom.scope.variables.contains(&s.to_string()) {
                 mvars.insert(s.to_string());
             }
         }
@@ -528,7 +550,7 @@ pub fn mandatory_variables(axiom: &Axiom) -> HashSet<String> {
     mvars
 }
 
-pub fn mandatory_hypotheses(axiom: &Axiom, labels: &Vec<String>) -> Vec<String> {
+pub fn mandatory_hypotheses(axiom: &Assertion, labels: &HashMap<String, u32>) -> Vec<String> {
     let mut mhyps = HashSet::new();
 
     let mvars = mandatory_variables(axiom);
@@ -542,12 +564,12 @@ pub fn mandatory_hypotheses(axiom: &Axiom, labels: &Vec<String>) -> Vec<String> 
     }
 
     let mut sorted_mhyps: Vec<String> = mhyps.iter().cloned().collect();
-    sorted_mhyps.sort_by_key(|k| labels.iter().position(|l| l == k).unwrap());
+    sorted_mhyps.sort_by_key(|k| labels[k]);
 
     sorted_mhyps
 }
 
-pub fn mandatory_disjoints(axiom: &Axiom) -> HashSet<(String, String)> {
+pub fn mandatory_disjoints(axiom: &Assertion) -> HashSet<(String, String)> {
     let mut mdisjs = HashSet::new();
 
     let mvars = mandatory_variables(axiom);
@@ -567,10 +589,10 @@ pub fn decompress_proof(proof: &Proof) -> Vec<String> {
     }
 }
 
-pub fn apply_substitutions(subst: &HashMap<String, Vec<String>>, syms: &Vec<String>, constants: &Vec<String>) -> Vec<String> {
+pub fn apply_substitutions(subst: &HashMap<String, Vec<String>>, syms: &Vec<String>, constants: &HashSet<String>) -> Vec<String> {
     let mut subst_syms = vec![];
     for s in syms {
-        if constants.contains(&s) {
+        if constants.contains(&s.to_string()) {
             subst_syms.push(s.to_string());
             continue;
         }
@@ -579,7 +601,7 @@ pub fn apply_substitutions(subst: &HashMap<String, Vec<String>>, syms: &Vec<Stri
     subst_syms
 }
 
-pub fn find_substitutions(stack: &Vec<TypedSymbols>, mhyps: &Vec<String>, scope: &Scope, constants: &Vec<String>) -> Result<HashMap<String, Vec<String>>, String> {
+pub fn find_substitutions(stack: &Vec<TypedSymbols>, mhyps: &Vec<String>, scope: &Scope, constants: &HashSet<String>) -> Result<HashMap<String, Vec<String>>, String> {
     let mut subst = HashMap::new();
     let mut i = stack.len() - mhyps.len();
     for label in mhyps {
@@ -613,9 +635,9 @@ pub fn find_substitutions(stack: &Vec<TypedSymbols>, mhyps: &Vec<String>, scope:
     Ok(subst)
 }
 
-pub fn are_expressions_disjoint(expr1: &Vec<String>, expr2: &Vec<String>, provable_vars: &Vec<String>, provable_disjs: &Vec<(String, String)>) -> bool {
-    let vars1 = expr1.into_iter().filter(|v| provable_vars.contains(&v)).collect_vec();
-    let vars2 = expr2.into_iter().filter(|v| provable_vars.contains(&v)).collect_vec();
+pub fn are_expressions_disjoint(expr1: &Vec<String>, expr2: &Vec<String>, provable_vars: &HashSet<String>, provable_disjs: &HashSet<(String, String)>) -> bool {
+    let vars1 = expr1.into_iter().filter(|v| provable_vars.contains(&v.to_string())).collect_vec();
+    let vars2 = expr2.into_iter().filter(|v| provable_vars.contains(&v.to_string())).collect_vec();
     let allpairs = vars2.iter().flat_map(|v2| vars1.iter().clone().map(move |v1| (v1.to_string(), v2.to_string())));
     for vpair in allpairs {
         if !provable_disjs.contains(&vpair) {
@@ -636,7 +658,7 @@ pub fn is_disjoint_restriction_verified(vpair: (&str, &str), mdisjs: &HashSet<(S
     true
 }
 
-pub fn are_disjoint_restrictions_verified(axiom: &Axiom, provable_scope: &Scope, subst: &HashMap<String, Vec<String>>) -> bool {
+pub fn are_disjoint_restrictions_verified(axiom: &Assertion, provable_scope: &Scope, subst: &HashMap<String, Vec<String>>) -> bool {
     let mvars = mandatory_variables(axiom);
     let mdisjs = mandatory_disjoints(axiom);
     for (v1, v2) in mvars.iter().tuple_combinations() {
@@ -647,7 +669,7 @@ pub fn are_disjoint_restrictions_verified(axiom: &Axiom, provable_scope: &Scope,
     true
 }
 
-pub fn apply_axiom(axiom: &Axiom, provable_scope: &Scope, program: &Program, mut stack: Vec<TypedSymbols>) -> Result<Vec<TypedSymbols>, String> {
+pub fn apply_axiom(axiom: &Assertion, provable_scope: &Scope, program: &Program, mut stack: Vec<TypedSymbols>) -> Result<Vec<TypedSymbols>, String> {
     let mhyps = mandatory_hypotheses(axiom, &program.labels);
     if stack.len() < mhyps.len() {
         return Err("Not enough items on the stack".to_string());
@@ -670,9 +692,9 @@ pub fn apply_axiom(axiom: &Axiom, provable_scope: &Scope, program: &Program, mut
     }
 }
 
-pub fn verify_proof(provable: &Provable, program: &Program) -> Result<(), String> {
+pub fn verify_proof(provable: &Assertion, program: &Program) -> Result<(), String> {
     let mut stack = vec![];
-    let proof_labels = decompress_proof(&provable.proof);
+    let proof_labels = decompress_proof(provable.proof.as_ref().unwrap());
     let scope = &provable.scope;
 
     for label in proof_labels {
@@ -690,6 +712,14 @@ pub fn verify_proof(provable: &Provable, program: &Program) -> Result<(), String
                 Ok(updated_stack) => stack = updated_stack,
                 Err(e) => return Err(e)
             }
+            continue
+        }
+        if program.provables.contains_key(&label) {
+            match apply_axiom(&program.provables[&label], scope, &program, stack) {
+                Ok(updated_stack) => stack = updated_stack,
+                Err(e) => return Err(e)
+            }
+            continue
         }
     }
 
@@ -724,7 +754,8 @@ pub fn verify_proofs(program: &Program) -> bool {
 pub fn parse_metamath(filename: &str) {
     let io = FileIO {};
     let (program_text, _included_files) = read_file(&io, filename, vec![], ".").unwrap();
-    let program = parse_program(&program_text);
-    println!("Result: {}", program.unwrap());
+    let program = parse_program(&program_text).unwrap();
+    println!("Result: {}", program);
+    // println!("There are {} theorems to prove", program.provables.len());
 }
 
