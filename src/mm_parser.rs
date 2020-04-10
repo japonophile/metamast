@@ -196,10 +196,9 @@ impl std::fmt::Display for Program {
     }
 }
 
-pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_constant_stmt(stmt: Pair<Rule>, mut program: Program) -> Result<Program, String> {
     // println!("Parse constant_stmt");
     let now = Instant::now();
-    let mut program = program;
     for constant in stmt.into_inner() {
         let c = constant.as_span().as_str().to_string();
         if program.constants.contains(&c) {
@@ -219,10 +218,9 @@ pub fn parse_constant_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
     Ok(program)
 }
 
-pub fn parse_variable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_variable_stmt(stmt: Pair<Rule>, mut program: Program) -> Result<Program, String> {
     // println!("Parse variable_stmt");
     let now = Instant::now();
-    let mut program = program;
     for variable in stmt.into_inner() {
         let v = variable.as_span().as_str().to_string();
         if program.scope.variables.contains(&v) {
@@ -359,11 +357,9 @@ pub fn parse_essential_stmt(stmt: Pair<Rule>, program: Program) -> Result<Progra
     }
 }
 
-pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
+pub fn parse_disjoint_stmt(stmt: Pair<Rule>, mut program: Program) -> Result<Program, String> {
     // println!("Parse disjoint_stmt");
-    let mut program = program;
     let children = stmt.into_inner();
-
     let mut vars = vec![];
     for var in children {
         let v = var.as_span().as_str().to_string();
@@ -376,17 +372,14 @@ pub fn parse_disjoint_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program
         vars.push(v.to_string());
     }
     vars.sort();
-
     for (v1, v2) in vars.iter().tuple_combinations() {
         program.scope.disjoints.insert((v1.to_string(), v2.to_string()));
     }
-
     Ok(program)
 }
 
 pub fn parse_axiom_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     // println!("Parse axiom_stmt");
-
     match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
             // println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
@@ -435,7 +428,6 @@ pub fn parse_proof(stmt: &Pair<Rule>) -> Result<Proof, String> {
 
 pub fn parse_provable_stmt(stmt: Pair<Rule>, program: Program) -> Result<Program, String> {
     // println!("Parse provable_stmt");
-
     match parse_typed_symbols(&stmt, &program) {
         Ok((label, typed_symbols)) => {
             // println!("  {} {} {:?}", label, typed_symbols.typ, typed_symbols.syms);
@@ -533,7 +525,6 @@ pub fn parse_program(program_text: &str) -> Result<Program, String> {
 
 pub fn mandatory_variables(axiom: &Assertion) -> HashSet<String> {
     let mut mvars = HashSet::new();
-
     for s in axiom.ax.syms.iter() {
         if axiom.scope.variables.contains(&s.to_string()) {
             mvars.insert(s.to_string());
@@ -546,13 +537,11 @@ pub fn mandatory_variables(axiom: &Assertion) -> HashSet<String> {
             }
         }
     }
-
     mvars
 }
 
 pub fn mandatory_hypotheses(axiom: &Assertion, labels: &HashMap<String, u32>) -> Vec<String> {
     let mut mhyps = HashSet::new();
-
     let mvars = mandatory_variables(axiom);
     for (label, f) in axiom.scope.floatings.iter() {
         if mvars.contains(&f.var) {
@@ -562,23 +551,19 @@ pub fn mandatory_hypotheses(axiom: &Assertion, labels: &HashMap<String, u32>) ->
     for label in axiom.scope.essentials.keys() {
         mhyps.insert(label.to_string());
     }
-
     let mut sorted_mhyps: Vec<String> = mhyps.iter().cloned().collect();
     sorted_mhyps.sort_by_key(|k| labels[k]);
-
     sorted_mhyps
 }
 
 pub fn mandatory_disjoints(axiom: &Assertion) -> HashSet<(String, String)> {
     let mut mdisjs = HashSet::new();
-
     let mvars = mandatory_variables(axiom);
     for (v1, v2) in axiom.scope.disjoints.iter() {
         if mvars.contains(v1) && mvars.contains(v2) {
             mdisjs.insert((v1.to_string(), v2.to_string()));
         }
     }
-
     mdisjs
 }
 
@@ -660,6 +645,8 @@ pub fn is_disjoint_restriction_verified(vpair: (&str, &str), mdisjs: &HashSet<(S
 
 pub fn are_disjoint_restrictions_verified(axiom: &Assertion, provable_scope: &Scope, subst: &HashMap<String, Vec<String>>) -> bool {
     let mvars = mandatory_variables(axiom);
+    let mut mvars = mvars.iter().collect_vec();
+    mvars.sort();
     let mdisjs = mandatory_disjoints(axiom);
     for (v1, v2) in mvars.iter().tuple_combinations() {
         if !is_disjoint_restriction_verified((v1, v2), &mdisjs, provable_scope, subst) {
@@ -696,7 +683,6 @@ pub fn verify_proof(provable: &Assertion, program: &Program) -> Result<(), Strin
     let mut stack = vec![];
     let proof_labels = decompress_proof(provable.proof.as_ref().unwrap());
     let scope = &provable.scope;
-
     for label in proof_labels {
         if scope.floatings.contains_key(&label) {
             let f = &scope.floatings[&label];
@@ -722,7 +708,6 @@ pub fn verify_proof(provable: &Assertion, program: &Program) -> Result<(), Strin
             continue
         }
     }
-
     if stack.len() > 1 {
         return Err("Too many items left in the stack".to_string());
     }
