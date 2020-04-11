@@ -130,12 +130,21 @@ pub struct Scope {
     pub disjoints: HashSet<(String, String)>
 }
 
+#[derive(Clone, Debug)]
+pub enum ProofStep {
+    Label(String),
+    Save(),
+    Load(usize),
+    Unknown()
+}
+
 #[derive(Debug)]
 pub enum Proof {
     Uncompressed {
-        labels: Vec<String>
+        labels: Vec<ProofStep>
     },
     Compressed {
+        labels: Vec<String>,
         chars: String
     }
 }
@@ -412,11 +421,29 @@ pub fn parse_proof(stmt: &Pair<Rule>) -> Result<Proof, String> {
                 let syms = proof.into_inner().fold(
                     vec![], |mut ss, s| { ss.push(s.as_span().as_str().to_string()); ss });
                 // println!("  uncompressed_proof {:?}", syms);
-                return Ok(Proof::Uncompressed { labels: syms })
+                return Ok(Proof::Uncompressed {
+                    labels: syms.iter().map(|s| {
+                        if s == "?" {
+                            ProofStep::Unknown()
+                        }
+                        else {
+                            ProofStep::Label(s.to_string())
+                        }}).collect_vec()
+                })
             },
             Rule::compressed_proof => {
-                // println!("  compressed_proof {:?}", proof);
-                return Ok(Proof::Compressed { chars: proof.as_span().as_str().to_string() })
+                let mut labels = vec![];
+                let mut chars = "".to_string();
+                for s in proof.into_inner() {
+                    if s.as_rule() == Rule::label {
+                        labels.push(s.as_span().as_str().to_string());
+                    }
+                    if s.as_rule() == Rule::compressed_proof_block {
+                        chars.push_str(s.as_span().as_str());
+                    }
+                }
+                // println!("  compressed_proof {:?} {:?}", labels, chars);
+                return Ok(Proof::Compressed { labels: labels, chars: chars })
             },
             _ => {
                 return Err("Proof should be either uncompressed or compressed".to_string())
@@ -495,6 +522,7 @@ pub fn parse_program(program_text: &str) -> Result<Program, String> {
     println!("Parsing program...");
     let now = Instant::now();
     let mut result = MetamathParser::parse(Rule::database, program_text);
+    // println!("Parse result: {:?}", result);
     match result {
         Ok(ref mut tree) => {
             println!(" . Program parsed in {} seconds.", now.elapsed().as_secs());
@@ -567,10 +595,46 @@ pub fn mandatory_disjoints(axiom: &Assertion) -> HashSet<(String, String)> {
     mdisjs
 }
 
-pub fn decompress_proof(proof: &Proof) -> Vec<String> {
+pub fn decode_proof_chars(chars: &String, labels: &Vec<String>, mhyps: &Vec<String>) -> Vec<ProofStep> {
+    let m = mhyps.len();
+    let n = labels.len();
+    let mut codes = vec![];
+    let mut acc = 0;
+    for c in chars.chars() {
+        if c == '?' {
+            codes.push(ProofStep::Unknown());
+            continue
+        }
+        if c == 'Z' {
+            codes.push(ProofStep::Save());
+            continue
+        }
+        if c > 'T' {
+            acc = 5 * acc + 20 * ((c as u32) - 84);
+            continue
+        }
+        let i = (acc + ((c as u32) - 64)) as usize;
+        if i <= m {
+            codes.push(ProofStep::Label(mhyps[i - 1].to_string()));
+            continue
+        }
+        if i <= m + n {
+            codes.push(ProofStep::Label(labels[i - m - 1].to_string()));
+            continue
+        }
+        codes.push(ProofStep::Load(i - m - n - 1));
+    }
+    codes
+}
+
+pub fn decompress_proof(provable: &Assertion, program_labels: &HashMap<String, u32>) -> Vec<ProofStep> {
+    let proof = provable.proof.as_ref().unwrap();
     match proof {
-        Proof::Uncompressed { labels } => labels.clone(),
-        Proof::Compressed { chars: _ } => vec![]
+        Proof::Uncompressed { labels } => labels.to_vec(),
+        Proof::Compressed { labels, chars } => {
+            let mhyps = mandatory_hypotheses(provable, program_labels);
+            decode_proof_chars(chars, labels, &mhyps)
+        }
     }
 }
 
@@ -681,31 +745,43 @@ pub fn apply_axiom(axiom: &Assertion, provable_scope: &Scope, program: &Program,
 
 pub fn verify_proof(provable: &Assertion, program: &Program) -> Result<(), String> {
     let mut stack = vec![];
-    let proof_labels = decompress_proof(provable.proof.as_ref().unwrap());
+    let mut memory = vec![];
+    let proof_labels = decompress_proof(provable, &program.labels);
     let scope = &provable.scope;
     for label in proof_labels {
-        if scope.floatings.contains_key(&label) {
-            let f = &scope.floatings[&label];
-            stack.push(TypedSymbols { typ: f.typ.to_string(), syms: vec![f.var.to_string()] });
-            continue
-        }
-        if scope.essentials.contains_key(&label) {
-            stack.push(scope.essentials[&label].clone());
-            continue
-        }
-        if program.axioms.contains_key(&label) {
-            match apply_axiom(&program.axioms[&label], scope, &program, stack) {
-                Ok(updated_stack) => stack = updated_stack,
-                Err(e) => return Err(e)
-            }
-            continue
-        }
-        if program.provables.contains_key(&label) {
-            match apply_axiom(&program.provables[&label], scope, &program, stack) {
-                Ok(updated_stack) => stack = updated_stack,
-                Err(e) => return Err(e)
-            }
-            continue
+        match label {
+            ProofStep::Label(label) => {
+                if scope.floatings.contains_key(&label) {
+                    let f = &scope.floatings[&label];
+                    stack.push(TypedSymbols { typ: f.typ.to_string(), syms: vec![f.var.to_string()] });
+                    continue
+                }
+                if scope.essentials.contains_key(&label) {
+                    stack.push(scope.essentials[&label].clone());
+                    continue
+                }
+                if program.axioms.contains_key(&label) {
+                    match apply_axiom(&program.axioms[&label], scope, &program, stack) {
+                        Ok(updated_stack) => stack = updated_stack,
+                        Err(e) => return Err(e)
+                    }
+                    continue
+                }
+                if program.provables.contains_key(&label) {
+                    match apply_axiom(&program.provables[&label], scope, &program, stack) {
+                        Ok(updated_stack) => stack = updated_stack,
+                        Err(e) => return Err(e)
+                    }
+                    continue
+                }
+            },
+            ProofStep::Save() => {
+                memory.push(stack[stack.len() - 1].clone());
+            },
+            ProofStep::Load(i) => {
+                stack.push(memory[i].clone());
+            },
+            ProofStep::Unknown() => continue
         }
     }
     if stack.len() > 1 {
@@ -741,6 +817,6 @@ pub fn parse_metamath(filename: &str) {
     let (program_text, _included_files) = read_file(&io, filename, vec![], ".").unwrap();
     let program = parse_program(&program_text).unwrap();
     println!("Result: {}", program);
-    // println!("There are {} theorems to prove", program.provables.len());
+    println!("There are {} theorems to prove", program.provables.len());
 }
 

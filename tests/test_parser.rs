@@ -423,5 +423,34 @@ fn test_08_proof_verification() {
         $} ";
     let program = parse_program(program_text).unwrap();
     assert!(verify_proofs(&program));
+
+    let program_text = "
+        $c |- not implies wff LOGBINOP $.
+        $v logbinop phi psi chi $.
+        logbinop_ $f LOGBINOP logbinop $.
+        wff_phi $f wff phi $.
+        wff_psi $f wff psi $.
+        wff-chi $f wff chi $.
+        wff_logbinop $a wff logbinop psi phi $.
+        logbinopimplies $a LOGBINOP implies $.
+        ax-2 $a |- implies
+                      implies phi implies psi chi
+                      implies
+                         implies phi psi
+                         implies phi chi  $.
+        ${
+           min $e |- phi $.
+           maj $e |- implies phi psi $.
+           ax-mp $a |- psi $.
+        $}
+        ${
+          mpd.1 $e |- implies phi psi $.
+          mpd.2 $e |- implies phi implies psi chi $.
+          mpd $p |- implies phi chi $=
+            ( logbinopimplies wff_logbinop ax-2 ax-mp ) FBAGZFCAGZDFFCBGAGFKJGEABCHII
+            $.
+        $} ";
+    let program = parse_program(program_text).unwrap();
+    assert!(verify_proofs(&program));
 }
 
