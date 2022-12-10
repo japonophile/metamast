@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use pbr::ProgressBar;
 use pest::Parser;
 use pest::iterators::Pair;
 use regex::Regex;
@@ -616,13 +617,16 @@ pub fn decode_proof_chars(chars: &String, labels: &Vec<String>, mhyps: &Vec<Stri
         let i = (acc + ((c as u32) - 64)) as usize;
         if i <= m {
             codes.push(ProofStep::Label(mhyps[i - 1].to_string()));
+            acc = 0;
             continue
         }
         if i <= m + n {
             codes.push(ProofStep::Label(labels[i - m - 1].to_string()));
+            acc = 0;
             continue
         }
         codes.push(ProofStep::Load(i - m - n - 1));
+        acc = 0;
     }
     codes
 }
@@ -687,7 +691,12 @@ pub fn find_substitutions(stack: &Vec<TypedSymbols>, mhyps: &Vec<String>, scope:
 pub fn are_expressions_disjoint(expr1: &Vec<String>, expr2: &Vec<String>, provable_vars: &HashSet<String>, provable_disjs: &HashSet<(String, String)>) -> bool {
     let vars1 = expr1.into_iter().filter(|v| provable_vars.contains(&v.to_string())).collect_vec();
     let vars2 = expr2.into_iter().filter(|v| provable_vars.contains(&v.to_string())).collect_vec();
-    let allpairs = vars2.iter().flat_map(|v2| vars1.iter().clone().map(move |v1| (v1.to_string(), v2.to_string())));
+    let allpairs = vars2.iter().flat_map(|v2| vars1.iter().clone().map(move |v1| {
+        let mut v = [v1, v2];
+        v.sort();
+        let [v1, v2] = v;
+        (v1.to_string(), v2.to_string())
+    }));
     for vpair in allpairs {
         if !provable_disjs.contains(&vpair) {
             return false;
@@ -803,20 +812,30 @@ pub fn verify_proof(provable: &Assertion, program: &Program) -> Result<(), Strin
 }
 
 pub fn verify_proofs(program: &Program) -> bool {
-    program.provables.iter().all(|(l, p)| {
-        print!("Verifying {:?} ...", l);
+    let n = program.provables.len();
+    if n == 0 {
+        return true;
+    }
+    let now = Instant::now();
+    let mut pb = ProgressBar::new(n as u64);
+    pb.format("[=>-]");
+    println!("Verifying {} proofs...", n);
+    let result = program.provables.iter().all(|(l, p)| {
         match verify_proof(p, program) {
-            Ok(()) => { println!(" OK!"); true },
-            Err(e) => { println!(" FAILED ({})", e); false }
+            Ok(()) => { pb.inc(); true },
+            Err(e) => { println!(" Proof {} {:?} verification FAILED ({})", l, p, e); false }
         }
-    })
+    });
+    pb.finish_print(format!(" . Proofs verified in {} seconds.", now.elapsed().as_secs()).as_str());
+    result
 }
 
-pub fn parse_metamath(filename: &str) {
+pub fn parse_metamath(filename: &str) -> Program {
     let io = FileIO {};
     let (program_text, _included_files) = read_file(&io, filename, vec![], ".").unwrap();
     let program = parse_program(&program_text).unwrap();
     println!("Result: {}", program);
     println!("There are {} theorems to prove", program.provables.len());
+    program
 }
 

@@ -4,6 +4,7 @@ extern crate pest_derive;
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
+extern crate pbr;
 
 pub mod mm_parser;
 

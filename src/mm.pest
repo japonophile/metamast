@@ -43,11 +43,11 @@ proof = { uncompressed_proof | compressed_proof }
 uncompressed_proof = { ( label | "?" )+ }
 compressed_proof = { start_compr_proof_labels ~ label* ~ end_compr_proof_labels ~ compressed_proof_block+ }
 
-typecode = { constant }
+typecode = @{ constant }
 
-filename = { math_symbol }
-constant = { math_symbol }
-variable = { math_symbol }
+filename = @{ math_symbol }
+constant = @{ math_symbol }
+variable = @{ math_symbol }
 
 // ASCII printable characters, except '$' and whitespaces
 math_symbol = @{ ( !"$" ~ '\x21'..'\x7e' )+ }
